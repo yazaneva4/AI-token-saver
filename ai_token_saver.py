@@ -101,12 +101,10 @@ def _redact_all_known_patterns(text: str) -> str:
 
 
 def _line_key(line: str) -> str:
-    # Ignore only trailing spaces/tabs for duplicate detection; preserve indentation.
     return line.rstrip(" \t")
 
 
 def deduplicate(lines: Iterable[str]) -> list[str]:
-    """Conservatively remove duplicate non-empty lines, preserving indentation."""
     result: list[str] = []
     seen: set[str] = set()
     for raw in lines:
@@ -133,7 +131,6 @@ class RealtimeCompactor:
         self._original_parts: list[str] = []
         self._output_parts: list[str] = []
         self.finished = False
-        self._pending_cr = False
 
     def _process_line(self, raw_line: str, newline: str) -> str:
         line = _redact_all_known_patterns(raw_line) if self.redact_secrets else raw_line
@@ -157,20 +154,18 @@ class RealtimeCompactor:
             return ""
         self._original_parts.append(chunk)
         self._buffer += chunk
-
         output: list[str] = []
         start = 0
         i = 0
         while i < len(self._buffer):
             char = self._buffer[i]
             if char == "\n":
-                newline = "\r\n" if i > start and self._buffer[i - 1] == "\r" else "\n"
-                raw_end = i - 1 if newline == "\r\n" else i
+                raw_end = i - 1 if i > start and self._buffer[i - 1] == "\r" else i
                 output.append(self._process_line(self._buffer[start:raw_end], newline="\n"))
                 start = i + 1
             elif char == "\r":
                 if i + 1 >= len(self._buffer):
-                    break  # CR may be the first half of CRLF in the next chunk.
+                    break
                 if self._buffer[i + 1] == "\n":
                     output.append(self._process_line(self._buffer[start:i], newline="\n"))
                     start = i + 2
@@ -236,7 +231,13 @@ def compact_stream(chunks: Iterable[str], *, redact_secrets: bool = True, tokeni
 def compact_text(text: str, *, redact_secrets: bool = True) -> str:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    return "".join(compact_stream([text], redact_secrets=redact_secrets))
+    if not text:
+        return ""
+    had_final_newline = text.endswith(("\n", "\r"))
+    result = "".join(compact_stream([text], redact_secrets=redact_secrets))
+    if not had_final_newline:
+        result = result.rstrip("\r\n")
+    return result
 
 
 def compact_text_with_metrics(text: str, *, redact_secrets: bool = True, tokenizer: TokenizerLike | None = None) -> CompactionResult:

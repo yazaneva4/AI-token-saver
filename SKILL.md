@@ -17,8 +17,8 @@ work accurately while using less context.
 **Preserve meaning first. Reduce safe redundancy second. Measure the result third.**
 
 A reduction of up to about 99% may be possible for highly repetitive or padded
-input, but it is never a guaranteed target. Never remove information merely to
-reach a percentage.
+input, but it is never a guaranteed target. Never remove information merely
+to reach a percentage.
 
 ## Core Rules
 
@@ -37,6 +37,34 @@ reach a percentage.
    other secrets.
 10. Do not save temporary chatter unless explicitly requested.
 
+## Provider Integration
+
+When integrating with an AI provider:
+
+- Use the provider's official tokenizer or token-counting API when available.
+- Never guess provider-specific token counts when an official counter is
+  unavailable.
+- Never claim to know a user's remaining usage quota unless the provider exposes
+  it through an available interface.
+- Never attempt to bypass, reset, or remove provider usage limits.
+- Keep provider-specific integrations separate from the provider-agnostic core.
+- Do not assume access to hidden provider telemetry, billing data, or internal
+  context-management state.
+
+## Code Preservation
+
+When processing source code or other exact technical content:
+
+- Preserve indentation and syntax.
+- Preserve comments when they contain useful information.
+- Never deduplicate lines solely because they look similar.
+- Never modify commands, paths, identifiers, versions, or configuration values
+  unless explicitly requested.
+- Prefer removing redundant surrounding explanation rather than modifying
+  executable code.
+- If uncertain whether two pieces of code or configuration are equivalent,
+  keep both rather than risk changing behavior.
+
 ## Token Measurement
 
 AI Token Saver supports two measurement modes:
@@ -51,6 +79,20 @@ AI Token Saver supports two measurement modes:
 
 Always report the reduction actually measured for the specific input. Do not
 promise a fixed savings percentage.
+
+## Benchmarking
+
+When evaluating savings:
+
+- Measure before and after using the same tokenizer or counting method.
+- Report input tokens, output tokens, saved tokens, and percentage reduction
+  when those measurements are available.
+- Test both repetitive and non-repetitive inputs.
+- Do not use a highly repetitive example as evidence that the same reduction
+  applies universally.
+- Keep approximate measurements clearly labeled as approximate.
+- If no reliable measurement is available, say that the result is an estimate
+  instead of inventing a number.
 
 ## Safe Token Optimization
 
@@ -73,6 +115,18 @@ When saving context:
 The implementation is primarily a conservative redundancy remover. It is not a
 semantic summarizer and must not pretend that every unique conversation can be
 compressed by 99% without information loss.
+
+## Failure Safety
+
+If compaction could remove information needed for correctness:
+
+- Keep the information.
+- Prefer lower savings over information loss.
+- If uncertain whether two pieces of information are equivalent, do not merge
+  them.
+- Never invent missing context to make the compressed result appear complete.
+- If an operation fails, report the failure rather than claiming it succeeded.
+- Prefer an uncompressed result over a corrupted or misleading compressed result.
 
 ## Real-Time Compaction
 

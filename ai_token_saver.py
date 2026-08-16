@@ -1,32 +1,24 @@
-"""AI Token Saver: compact, dependency-free project context storage.
-
-The module provides conservative text compaction, pluggable token counting,
-real-time incremental compaction, secret redaction, and a small JSON memory
-store. Reduction is measured using the configured tokenizer when one is
-supplied; otherwise the fallback estimator is explicitly approximate.
-"""
+"""AI Token Saver: conservative, dependency-free context compaction and memory."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields
 import json
-import re
 from pathlib import Path
+import re
 from typing import Callable, Iterable, Iterator, Mapping, Protocol
 
 
 class Tokenizer(Protocol):
-    """Tokenizer interface used for model-specific token accounting."""
-
     def encode(self, text: str) -> object: ...
 
 
 TokenCounter = Callable[[str], int]
+TokenizerLike = Tokenizer | TokenCounter
 
 
 @dataclass
 class CompactionResult:
-    """Result of text compaction with before/after token metrics."""
     original: str
     compacted: str
     in_tokens: int
@@ -49,22 +41,17 @@ class Memory:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> "Memory":
-        """Build Memory safely from JSON, ignoring unknown fields and bad list values."""
-        result: dict[str, object] = {}
+        values: dict[str, object] = {}
+        list_fields = {"state", "decisions", "files", "issues", "next_steps", "preferences", "history"}
         for item in fields(cls):
             value = data.get(item.name)
             if item.name in {"project", "goal"}:
-                result[item.name] = value if isinstance(value, str) else ""
-            else:
-                result[item.name] = (
-                    [str(entry) for entry in value if isinstance(entry, (str, int, float))]
-                    if isinstance(value, list)
-                    else []
-                )
-        return cls(**result)
+                values[item.name] = value if isinstance(value, str) else ""
+            elif item.name in list_fields:
+                values[item.name] = [str(x) for x in value if isinstance(x, (str, int, float))] if isinstance(value, list) else []
+        return cls(**values)
 
 
-_SPACE = re.compile(r"\s+")
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"),
     re.compile(r"(?i)(\bBearer\s+)([A-Za-z0-9._~+/=-]+)"),
@@ -74,54 +61,52 @@ _SECRET_PATTERNS = (
 
 
 def _fallback_token_count(text: str) -> int:
-    """Dependency-free estimate; this is not a model tokenizer."""
-    if not text.strip():
-        return 0
-    return max(1, round(len(text) / 4))
+    return 0 if not text.strip() else max(1, round(len(text) / 4))
 
 
-def _token_count_with(tokenizer: Tokenizer | TokenCounter | None, text: str) -> tuple[int, bool]:
-    """Count tokens with a supplied tokenizer/counter or use the fallback estimate."""
+def _token_count_with(tokenizer: TokenizerLike | None, text: str) -> tuple[int, bool]:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     if tokenizer is None:
         return _fallback_token_count(text), False
-
     if callable(tokenizer) and not hasattr(tokenizer, "encode"):
-        count = int(tokenizer(text))
+        count = tokenizer(text)
     else:
         encoded = tokenizer.encode(text)  # type: ignore[union-attr]
         try:
             count = len(encoded)  # type: ignore[arg-type]
         except TypeError as exc:
             raise TypeError("tokenizer.encode(text) must return a sized token sequence") from exc
-
+    if isinstance(count, bool) or not isinstance(count, int):
+        raise TypeError("token counter must return an integer")
     if count < 0:
         raise ValueError("token count cannot be negative")
     return count, True
 
 
-def estimate_tokens(text: str, tokenizer: Tokenizer | TokenCounter | None = None) -> int:
-    """Return a model-token count when a trusted tokenizer is supplied; otherwise estimate."""
+def estimate_tokens(text: str, tokenizer: TokenizerLike | None = None) -> int:
     return _token_count_with(tokenizer, text)[0]
 
 
-def _comparison_key(line: str) -> str:
-    """Compare lines conservatively, ignoring only trailing whitespace."""
-    return line.rstrip()
-
-
 def _redact_secrets(text: str) -> str:
-    redacted = text
+    result = text
     for pattern in _SECRET_PATTERNS[:2]:
-        redacted = pattern.sub(lambda match: match.group(1) + "[REDACTED]", redacted)
-    redacted = _SECRET_PATTERNS[2].sub("[REDACTED]", redacted)
-    redacted = _SECRET_PATTERNS[3].sub("[REDACTED]", redacted)
-    return redacted
+        result = pattern.sub(lambda m: m.group(1) + "[REDACTED]", result)
+    return _SECRET_PATTERNS[2].sub("[REDACTED]", result) if result else result
+
+
+def _redact_all_known_patterns(text: str) -> str:
+    result = _redact_secrets(text)
+    return _SECRET_PATTERNS[3].sub("[REDACTED]", result)
+
+
+def _line_key(line: str) -> str:
+    # Ignore only trailing spaces/tabs for duplicate detection; preserve indentation.
+    return line.rstrip(" \t")
 
 
 def deduplicate(lines: Iterable[str]) -> list[str]:
-    """Remove exact-content duplicate lines while preserving the first occurrence."""
+    """Conservatively remove duplicate non-empty lines, preserving indentation."""
     result: list[str] = []
     seen: set[str] = set()
     for raw in lines:
@@ -130,23 +115,17 @@ def deduplicate(lines: Iterable[str]) -> list[str]:
         line = raw.rstrip("\r\n")
         if not line.strip():
             continue
-        key = _comparison_key(line)
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(line)
+        key = _line_key(line)
+        if key not in seen:
+            seen.add(key)
+            result.append(line)
     return result
 
 
 class RealtimeCompactor:
-    """Incrementally compact text as complete logical lines become available."""
+    """Compact complete lines as chunks arrive, buffering only an incomplete line."""
 
-    def __init__(
-        self,
-        *,
-        redact_secrets: bool = True,
-        tokenizer: Tokenizer | TokenCounter | None = None,
-    ) -> None:
+    def __init__(self, *, redact_secrets: bool = True, tokenizer: TokenizerLike | None = None) -> None:
         self.redact_secrets = redact_secrets
         self.tokenizer = tokenizer
         self._buffer = ""
@@ -154,22 +133,22 @@ class RealtimeCompactor:
         self._original_parts: list[str] = []
         self._output_parts: list[str] = []
         self.finished = False
+        self._pending_cr = False
 
-    def _process_line(self, raw_line: str, has_newline: bool) -> str:
-        line = _redact_secrets(raw_line) if self.redact_secrets else raw_line
+    def _process_line(self, raw_line: str, newline: str) -> str:
+        line = _redact_all_known_patterns(raw_line) if self.redact_secrets else raw_line
         line = line.rstrip("\r\n")
         if not line.strip():
             return ""
-        key = _comparison_key(line)
+        key = _line_key(line)
         if key in self._seen:
             return ""
         self._seen.add(key)
-        output = line + ("\n" if has_newline else "")
+        output = line + newline
         self._output_parts.append(output)
         return output
 
     def feed(self, chunk: str) -> str:
-        """Feed a text chunk and return newly compacted complete lines."""
         if self.finished:
             raise RuntimeError("RealtimeCompactor is already finished")
         if not isinstance(chunk, str):
@@ -179,28 +158,37 @@ class RealtimeCompactor:
         self._original_parts.append(chunk)
         self._buffer += chunk
 
-        parts = self._buffer.splitlines(keepends=True)
-        if not parts:
-            return ""
-
-        # A trailing line without a recognized line ending is incomplete.
-        if parts[-1].endswith(("\n", "\r")):
-            complete = parts
-            self._buffer = ""
-        else:
-            complete = parts[:-1]
-            self._buffer = parts[-1]
-
-        return "".join(self._process_line(part, has_newline=True) for part in complete)
+        output: list[str] = []
+        start = 0
+        i = 0
+        while i < len(self._buffer):
+            char = self._buffer[i]
+            if char == "\n":
+                newline = "\r\n" if i > start and self._buffer[i - 1] == "\r" else "\n"
+                raw_end = i - 1 if newline == "\r\n" else i
+                output.append(self._process_line(self._buffer[start:raw_end], newline="\n"))
+                start = i + 1
+            elif char == "\r":
+                if i + 1 >= len(self._buffer):
+                    break  # CR may be the first half of CRLF in the next chunk.
+                if self._buffer[i + 1] == "\n":
+                    output.append(self._process_line(self._buffer[start:i], newline="\n"))
+                    start = i + 2
+                    i += 1
+                else:
+                    output.append(self._process_line(self._buffer[start:i], newline="\n"))
+                    start = i + 1
+            i += 1
+        self._buffer = self._buffer[start:]
+        return "".join(output)
 
     def finish(self) -> str:
-        """Flush the final partial line and return any remaining compacted output."""
         if self.finished:
             return ""
         self.finished = True
         if not self._buffer:
             return ""
-        final = self._process_line(self._buffer, has_newline=False)
+        final = self._process_line(self._buffer, newline="")
         self._buffer = ""
         return final
 
@@ -229,79 +217,43 @@ class RealtimeCompactor:
         return reduction(self.original, self.compacted, tokenizer=self.tokenizer)
 
     def result(self) -> CompactionResult:
-        """Return cumulative metrics after the stream has finished."""
         if not self.finished:
             raise RuntimeError("Call finish() before requesting the final result")
-        return CompactionResult(
-            original=self.original,
-            compacted=self.compacted,
-            in_tokens=self.in_tokens,
-            out_tokens=self.out_tokens,
-            reduction_percent=self.reduction_percent,
-            token_count_is_exact=self.token_count_is_exact,
-        )
+        return CompactionResult(self.original, self.compacted, self.in_tokens, self.out_tokens, self.reduction_percent, self.token_count_is_exact)
 
 
-def compact_stream(
-    chunks: Iterable[str],
-    *,
-    redact_secrets: bool = True,
-    tokenizer: Tokenizer | TokenCounter | None = None,
-) -> Iterator[str]:
-    """Yield compacted output incrementally as chunks arrive."""
+def compact_stream(chunks: Iterable[str], *, redact_secrets: bool = True, tokenizer: TokenizerLike | None = None) -> Iterator[str]:
     compactor = RealtimeCompactor(redact_secrets=redact_secrets, tokenizer=tokenizer)
     for chunk in chunks:
-        yield_from = compactor.feed(chunk)
-        if yield_from:
-            yield yield_from
+        emitted = compactor.feed(chunk)
+        if emitted:
+            yield emitted
     final = compactor.finish()
     if final:
         yield final
 
 
 def compact_text(text: str, *, redact_secrets: bool = True) -> str:
-    """Compact text while preserving trailing whitespace and final-newline semantics."""
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     return "".join(compact_stream([text], redact_secrets=redact_secrets))
 
 
-def compact_text_with_metrics(
-    text: str,
-    *,
-    redact_secrets: bool = True,
-    tokenizer: Tokenizer | TokenCounter | None = None,
-) -> CompactionResult:
-    """Compact text and return measured metrics."""
+def compact_text_with_metrics(text: str, *, redact_secrets: bool = True, tokenizer: TokenizerLike | None = None) -> CompactionResult:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     compacted = compact_text(text, redact_secrets=redact_secrets)
     in_tokens, exact = _token_count_with(tokenizer, text)
     out_tokens, _ = _token_count_with(tokenizer, compacted)
-    return CompactionResult(
-        original=text,
-        compacted=compacted,
-        in_tokens=in_tokens,
-        out_tokens=out_tokens,
-        reduction_percent=reduction(text, compacted, tokenizer=tokenizer),
-        token_count_is_exact=exact,
-    )
+    return CompactionResult(text, compacted, in_tokens, out_tokens, reduction(text, compacted, tokenizer=tokenizer), exact)
 
 
-def reduction(
-    before: str,
-    after: str,
-    *,
-    tokenizer: Tokenizer | TokenCounter | None = None,
-) -> float:
-    """Return measured token reduction as a fraction from 0 to 1."""
+def reduction(before: str, after: str, *, tokenizer: TokenizerLike | None = None) -> float:
     if not isinstance(before, str) or not isinstance(after, str):
         raise TypeError("before and after must be strings")
     old = estimate_tokens(before, tokenizer)
     new = estimate_tokens(after, tokenizer)
-    if old == 0:
-        return 0.0
-    return min(1.0, max(0.0, 1.0 - new / old))
+    return 0.0 if old == 0 else min(1.0, max(0.0, 1.0 - new / old))
 
 
 def save_memory(path: str | Path, memory: Memory) -> None:
@@ -314,7 +266,10 @@ def load_memory(path: str | Path) -> Memory:
     target = Path(path)
     if not target.exists():
         return Memory()
-    raw = json.loads(target.read_text(encoding="utf-8"))
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Could not read memory file: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError("Memory file must contain a JSON object")
     return Memory.from_dict(raw)
@@ -345,9 +300,8 @@ def memory_to_text(memory: Memory) -> str:
     if memory.goal:
         sections.append(f"GOAL: {memory.goal}")
     for title, values in [
-        ("STATE", memory.state), ("DECISIONS", memory.decisions),
-        ("FILES", memory.files), ("ISSUES", memory.issues),
-        ("NEXT", memory.next_steps), ("PREFERENCES", memory.preferences),
+        ("STATE", memory.state), ("DECISIONS", memory.decisions), ("FILES", memory.files),
+        ("ISSUES", memory.issues), ("NEXT", memory.next_steps), ("PREFERENCES", memory.preferences),
         ("HISTORY", memory.history),
     ]:
         values = deduplicate(values)
@@ -358,14 +312,12 @@ def memory_to_text(memory: Memory) -> str:
 
 if __name__ == "__main__":
     import argparse
-
     parser = argparse.ArgumentParser(description="Compact text for AI Token Saver.")
     parser.add_argument("text", nargs="?", help="Text to compact.")
     parser.add_argument("--keep-secrets", action="store_true", help="Disable default secret redaction.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed metrics.")
     args = parser.parse_args()
-    source = args.text or ""
-    result = compact_text_with_metrics(source, redact_secrets=not args.keep_secrets)
+    result = compact_text_with_metrics(args.text or "", redact_secrets=not args.keep_secrets)
     print(result.compacted, end="" if result.compacted.endswith("\n") else "\n")
     if args.verbose:
         print("\n--- Metrics ---")

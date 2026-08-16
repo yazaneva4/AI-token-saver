@@ -130,11 +130,7 @@ def _looks_like_technical_content(lines: list[str]) -> bool:
 
 
 def deduplicate(lines: Iterable[str], *, aggressive: bool = False) -> list[str]:
-    """Remove safe redundancy while preserving technical/code-like content.
-
-    Default mode removes only adjacent duplicate non-empty lines. Aggressive mode
-    removes repeated lines globally and should be used only for known prose/facts.
-    """
+    """Remove safe redundancy while preserving technical/code-like content."""
     result: list[str] = []
     seen: set[str] = set()
     previous_key: str | None = None
@@ -157,15 +153,18 @@ def _compact_lines(text: str, *, redact_mode: RedactionMode, aggressive: bool = 
     had_final_newline = text.endswith(("\n", "\r"))
     lines = text.splitlines()
     technical = _looks_like_technical_content(lines)
-    # Never use global duplicate removal on code, commands, JSON/YAML, logs, etc.
-    use_aggressive = aggressive and not technical
-    cleaned: list[str] = []
-    for line in lines:
-        if redact_mode != "off":
-            line = _redact_secrets(line, redact_mode)
-        cleaned.append(line)
-    result_lines = deduplicate(cleaned, aggressive=use_aggressive)
-    result = "\n".join(result_lines)
+    cleaned = [
+        _redact_secrets(line, redact_mode) if redact_mode != "off" else line
+        for line in lines
+    ]
+
+    # Technical content is loss-sensitive: preserve every line, including
+    # intentional duplicates and blank lines. Only secret redaction is applied.
+    if technical:
+        result = "\n".join(cleaned)
+    else:
+        result = "\n".join(deduplicate(cleaned, aggressive=aggressive))
+
     if had_final_newline and result:
         result += "\n"
     return result
@@ -196,7 +195,12 @@ class RealtimeCompactor:
             return ""
         self._technical = self._technical or _looks_like_technical_content([line])
         key = _line_key(line)
-        duplicate = key == self._previous_key if not self.aggressive or self._technical else key in self._seen
+        if self._technical:
+            duplicate = False
+        elif self.aggressive:
+            duplicate = key in self._seen
+        else:
+            duplicate = key == self._previous_key
         self._previous_key = key
         if duplicate:
             return ""

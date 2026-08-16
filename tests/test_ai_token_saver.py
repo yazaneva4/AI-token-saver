@@ -23,16 +23,22 @@ The current router is OpenSpark.
     assert result.count("OpenSpark") == 1
     assert "need to save the project state" in result
     assert estimate_tokens(result) < estimate_tokens(source)
+    assert result.endswith("\n")
 
 
-def test_compaction_preserves_code_indentation():
+def test_compaction_preserves_code_indentation_and_final_newline():
     source = """def hello():
     print(\"hello\")
     print(\"hello\")
 """
     result = compact_text(source, redact_secrets=False)
-    assert result == "def hello():\n    print(\"hello\")"
+    assert result == "def hello():\n    print(\"hello\")\n"
     assert result.startswith("def hello():\n    ")
+
+
+def test_compaction_preserves_no_final_newline():
+    source = "same\nsame"
+    assert compact_text(source, redact_secrets=False) == "same"
 
 
 def test_reduction_is_bounded():
@@ -98,6 +104,7 @@ def test_compact_text_with_metrics_returns_all_fields():
     assert result.out_tokens > 0
     assert result.out_tokens <= result.in_tokens
     assert 0.0 <= result.reduction_percent <= 1.0
+    assert result.token_count_is_exact is False
 
 
 def test_compact_text_with_metrics_shows_real_savings():
@@ -105,6 +112,20 @@ def test_compact_text_with_metrics_shows_real_savings():
     result = compact_text_with_metrics(repetitive)
     assert result.reduction_percent > 0.9
     assert result.in_tokens > result.out_tokens
+
+
+def test_exact_token_counter_is_used_and_marked_exact():
+    def counter(text: str) -> int:
+        return len(text.split())
+
+    result = compact_text_with_metrics(
+        "one two\none two\nthree\n",
+        tokenizer=counter,
+    )
+    assert result.in_tokens == 6
+    assert result.out_tokens == 3
+    assert result.token_count_is_exact is True
+    assert result.reduction_percent == 0.5
 
 
 def test_realtime_compactor_handles_split_chunks_and_deduplicates():
@@ -120,7 +141,7 @@ def test_realtime_compactor_preserves_code_indentation():
     compactor = RealtimeCompactor(redact_secrets=False)
     emitted = compactor.feed("def hello():\n    print(\"hello\")\n    print(\"hello\")")
     emitted += compactor.finish()
-    assert emitted == "def hello():\n    print(\"hello\")\n"
+    assert emitted == "def hello():\n    print(\"hello\")"
 
 
 def test_realtime_compactor_reports_metrics_after_finish():
@@ -138,7 +159,7 @@ def test_compact_stream_is_incremental_and_matches_compaction():
     chunks = ["one\n", "two\n", "two\nthree", "\n"]
     output = "".join(compact_stream(chunks, redact_secrets=False))
     assert output == "one\ntwo\nthree\n"
-    assert output.rstrip("\n") == compact_text("one\ntwo\ntwo\nthree", redact_secrets=False)
+    assert output == compact_text("one\ntwo\ntwo\nthree\n", redact_secrets=False)
 
 
 def test_realtime_handles_split_crlf_without_extra_blank_output():
@@ -178,3 +199,22 @@ def test_realtime_secret_redaction_across_chunks():
     assert "SECRET123" not in combined
     assert "abc123" not in combined
     assert "[REDACTED]" in combined
+
+
+def test_invalid_stream_chunk_type_is_rejected():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    try:
+        compactor.feed(123)  # type: ignore[arg-type]
+    except TypeError as exc:
+        assert "chunk must be a string" in str(exc)
+    else:
+        raise AssertionError("non-string chunks must be rejected")
+
+
+def test_invalid_text_type_is_rejected():
+    try:
+        compact_text(123)  # type: ignore[arg-type]
+    except TypeError as exc:
+        assert "text must be a string" in str(exc)
+    else:
+        raise AssertionError("non-string text must be rejected")

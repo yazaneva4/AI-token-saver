@@ -16,9 +16,9 @@ work accurately while using less context.
 
 **Preserve meaning first. Reduce safe redundancy second. Measure the result third.**
 
-A reduction of up to about 99% may be possible for highly repetitive or padded
-input, but it is never a guaranteed target. Never remove information merely
-to reach a percentage.
+Very high reductions, including around or above 99%, may occur on extremely
+repetitive or padded input. This is never a guaranteed target. Never remove
+information merely to reach a percentage.
 
 ## Core Rules
 
@@ -36,6 +36,26 @@ to reach a percentage.
 9. Never store passwords, API keys, authentication codes, private tokens, or
    other secrets.
 10. Do not save temporary chatter unless explicitly requested.
+
+## Safe Compaction
+
+The Python implementation is primarily a conservative redundancy remover, not a
+semantic summarizer.
+
+- Default text compaction removes blank lines and **adjacent** duplicate
+  non-empty lines.
+- It does not globally remove repeated lines by default.
+- Code-like, command-like, JSON/YAML-like, SQL-like, path-like, and other
+  technical content is protected from global duplicate removal.
+- Indentation and exact technical content must be preserved.
+- If uncertain whether repeated content is intentional, keep it.
+- `aggressive=True` may globally deduplicate non-technical prose, but technical
+  content remains protected.
+- Structured memory-list merging may use global exact-line deduplication because
+  those entries represent facts rather than executable source code.
+
+Never claim that the implementation performs semantic equivalence checking. It
+does not.
 
 ## Provider Integration
 
@@ -57,7 +77,7 @@ When processing source code or other exact technical content:
 
 - Preserve indentation and syntax.
 - Preserve comments when they contain useful information.
-- Never deduplicate lines solely because they look similar.
+- Never globally deduplicate lines solely because they look identical.
 - Never modify commands, paths, identifiers, versions, or configuration values
   unless explicitly requested.
 - Prefer removing redundant surrounding explanation rather than modifying
@@ -69,16 +89,30 @@ When processing source code or other exact technical content:
 
 AI Token Saver supports two measurement modes:
 
-- **Model-specific mode:** the host may provide the tokenizer used by the target
-  model, or a trusted token-counting function. The implementation can then use
-  that counter for input/output measurements. This is only as exact as the
+- **Supplied-tokenizer mode:** the host may provide the tokenizer used by the
+  target model, or a trusted token-counting function. The result records
+  `token_count_source="supplied-tokenizer"`. This is only as exact as the
   supplied tokenizer and its match to the target model.
 - **Fallback mode:** when no tokenizer is supplied, the implementation uses a
-  dependency-free character-based estimate. This is approximate and must never
-  be presented as an exact model-token count.
+  dependency-free character-based estimate and records
+  `token_count_source="approximate"`. This must never be presented as an exact
+  model-token count.
 
 Always report the reduction actually measured for the specific input. Do not
 promise a fixed savings percentage.
+
+## Redaction
+
+Secret-looking values are redacted by default.
+
+Supported modes:
+
+- `off` — disable redaction.
+- `common` — common API-key, password, bearer-token, and secret patterns.
+- `strict` — common patterns plus additional Google-style key detection.
+
+Redaction is a safety layer, not a credential manager and not a guarantee that
+every secret will be detected.
 
 ## Benchmarking
 
@@ -88,6 +122,7 @@ When evaluating savings:
 - Report input tokens, output tokens, saved tokens, and percentage reduction
   when those measurements are available.
 - Test both repetitive and non-repetitive inputs.
+- Test code and structured technical content separately from prose.
 - Do not use a highly repetitive example as evidence that the same reduction
   applies universally.
 - Keep approximate measurements clearly labeled as approximate.
@@ -98,9 +133,9 @@ When evaluating savings:
 
 When saving context:
 
-- Remove repeated information.
+- Remove repeated information only when the repetition is safely identifiable.
 - Remove genuine filler.
-- Merge clearly equivalent facts.
+- Merge clearly equivalent facts in structured memory.
 - Use concise wording where meaning is unchanged.
 - Keep one canonical version of each current fact.
 - Remove superseded duplicates when they no longer provide useful history.
@@ -111,10 +146,6 @@ When saving context:
 - Do not use unexplained abbreviations that could reduce clarity.
 - Do not rewrite code, commands, paths, model names, or error strings when
   exact text matters.
-
-The implementation is primarily a conservative redundancy remover. It is not a
-semantic summarizer and must not pretend that every unique conversation can be
-compressed by 99% without information loss.
 
 ## Failure Safety
 
@@ -135,8 +166,9 @@ chunks arrive instead of waiting for the complete input.
 
 - Feed incoming string chunks to the real-time compactor.
 - Incomplete final lines are buffered until their content is complete.
-- Newly completed unique lines can be emitted immediately.
-- The first occurrence's meaningful content is preserved.
+- Newly completed safe lines can be emitted immediately.
+- Adjacent duplicate lines may be removed.
+- Code-like and technical repeated lines must be preserved.
 - The final partial line is flushed when the stream finishes.
 - The current implementation is line-oriented, not character-level or
   token-level streaming.

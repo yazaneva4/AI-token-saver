@@ -1,4 +1,16 @@
-from ai_token_saver import Memory, compact_text, compact_text_with_metrics, estimate_tokens, load_memory, memory_to_text, merge_memory, reduction, save_memory
+from ai_token_saver import (
+    Memory,
+    RealtimeCompactor,
+    compact_stream,
+    compact_text,
+    compact_text_with_metrics,
+    estimate_tokens,
+    load_memory,
+    memory_to_text,
+    merge_memory,
+    reduction,
+    save_memory,
+)
 
 
 def test_compact_removes_duplicates_without_deleting_meaning():
@@ -93,3 +105,37 @@ def test_compact_text_with_metrics_shows_real_savings():
     result = compact_text_with_metrics(repetitive)
     assert result.reduction_percent > 0.9
     assert result.in_tokens > result.out_tokens
+
+
+def test_realtime_compactor_handles_split_chunks_and_deduplicates():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    assert compactor.feed("hello\nhel") == "hello\n"
+    assert compactor.feed("lo\nhello\nworld") == "world\n"
+    assert compactor.finish() == ""
+    assert compactor.compacted == "hello\nworld\n"
+    assert compactor.original == "hello\nhello\nhello\nworld"
+
+
+def test_realtime_compactor_preserves_code_indentation():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    emitted = compactor.feed("def hello():\n    print(\"hello\")\n    print(\"hello\")")
+    emitted += compactor.finish()
+    assert emitted == "def hello():\n    print(\"hello\")\n"
+
+
+def test_realtime_compactor_reports_metrics_after_finish():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    compactor.feed("same\nsame\nunique")
+    compactor.finish()
+    result = compactor.result()
+    assert result.original == "same\nsame\nunique"
+    assert result.compacted == "same\nunique"
+    assert result.in_tokens > result.out_tokens
+    assert result.reduction_percent > 0
+
+
+def test_compact_stream_is_incremental_and_matches_compaction():
+    chunks = ["one\n", "two\n", "two\nthree", "\n"]
+    output = "".join(compact_stream(chunks, redact_secrets=False))
+    assert output == "one\ntwo\nthree\n"
+    assert output.rstrip("\n") == compact_text("one\ntwo\ntwo\nthree", redact_secrets=False)

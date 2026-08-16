@@ -16,7 +16,7 @@ from typing import Callable, Iterable, Iterator, Mapping, Protocol
 
 
 class Tokenizer(Protocol):
-    """Minimal tokenizer interface accepted by AI Token Saver."""
+    """Tokenizer interface used for model-specific token accounting."""
 
     def encode(self, text: str) -> object: ...
 
@@ -74,14 +74,14 @@ _SECRET_PATTERNS = (
 
 
 def _fallback_token_count(text: str) -> int:
-    """Conservative dependency-free fallback; not a model tokenizer."""
+    """Dependency-free estimate; this is not a model tokenizer."""
     if not text.strip():
         return 0
     return max(1, round(len(text) / 4))
 
 
 def _token_count_with(tokenizer: Tokenizer | TokenCounter | None, text: str) -> tuple[int, bool]:
-    """Count tokens with a real tokenizer/counter when supplied, otherwise fallback."""
+    """Count tokens with a supplied tokenizer/counter or use the fallback estimate."""
     if tokenizer is None:
         return _fallback_token_count(text), False
 
@@ -99,20 +99,12 @@ def _token_count_with(tokenizer: Tokenizer | TokenCounter | None, text: str) -> 
     return count, True
 
 
-def estimate_tokens(
-    text: str,
-    tokenizer: Tokenizer | TokenCounter | None = None,
-) -> int:
-    """Count tokens with the supplied tokenizer, or use an explicit fallback.
-
-    For exact model-token accounting, pass the tokenizer used by the target model.
-    Without one, this remains an approximate character-based estimate.
-    """
+def estimate_tokens(text: str, tokenizer: Tokenizer | TokenCounter | None = None) -> int:
+    """Return a model-token count when a trusted tokenizer is supplied; otherwise estimate."""
     return _token_count_with(tokenizer, text)[0]
 
 
 def _comparison_key(line: str) -> str:
-    """Create a whitespace-insensitive comparison key without altering output."""
     return _SPACE.sub(" ", line.strip()).casefold()
 
 
@@ -126,7 +118,7 @@ def _redact_secrets(text: str) -> str:
 
 
 def deduplicate(lines: Iterable[str]) -> list[str]:
-    """Remove duplicate lines while preserving the first line's exact content."""
+    """Remove duplicate lines while preserving the first line's meaningful content."""
     result: list[str] = []
     seen: set[str] = set()
     for raw in lines:
@@ -142,7 +134,7 @@ def deduplicate(lines: Iterable[str]) -> list[str]:
 
 
 class RealtimeCompactor:
-    """Incrementally compact text as chunks arrive."""
+    """Incrementally compact text as complete logical lines become available."""
 
     def __init__(
         self,
@@ -172,9 +164,11 @@ class RealtimeCompactor:
         return output
 
     def feed(self, chunk: str) -> str:
-        """Feed one chunk and return newly compacted output immediately."""
+        """Feed a text chunk and return newly compacted complete lines."""
         if self.finished:
             raise RuntimeError("RealtimeCompactor is already finished")
+        if not isinstance(chunk, str):
+            raise TypeError("chunk must be a string")
         if not chunk:
             return ""
         self._original_parts.append(chunk)
@@ -184,6 +178,7 @@ class RealtimeCompactor:
         if not parts:
             return ""
 
+        # A trailing line without a recognized line ending is incomplete.
         if parts[-1].endswith(("\n", "\r")):
             complete = parts
             self._buffer = ""
@@ -251,17 +246,22 @@ def compact_stream(
     """Yield compacted output incrementally as chunks arrive."""
     compactor = RealtimeCompactor(redact_secrets=redact_secrets, tokenizer=tokenizer)
     for chunk in chunks:
-        emitted = compactor.feed(chunk)
-        if emitted:
-            yield emitted
-    emitted = compactor.finish()
-    if emitted:
-        yield emitted
+        yield_from = compactor.feed(chunk)
+        if yield_from:
+            yield yield_from
+    final = compactor.finish()
+    if final:
+        yield final
 
 
 def compact_text(text: str, *, redact_secrets: bool = True) -> str:
-    """Compact complete text conservatively without rewriting meaningful lines."""
-    return "".join(compact_stream([text], redact_secrets=redact_secrets)).rstrip("\n")
+    """Compact text while preserving whether the compacted result ends with a newline."""
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    result = "".join(compact_stream([text], redact_secrets=redact_secrets))
+    if text.endswith(("\n", "\r")) and result and not result.endswith("\n"):
+        result += "\n"
+    return result
 
 
 def compact_text_with_metrics(
@@ -270,7 +270,7 @@ def compact_text_with_metrics(
     redact_secrets: bool = True,
     tokenizer: Tokenizer | TokenCounter | None = None,
 ) -> CompactionResult:
-    """Compact text and return metrics using an exact tokenizer when supplied."""
+    """Compact text and return measured metrics."""
     compacted = compact_text(text, redact_secrets=redact_secrets)
     in_tokens, exact = _token_count_with(tokenizer, text)
     out_tokens, _ = _token_count_with(tokenizer, compacted)
@@ -290,7 +290,7 @@ def reduction(
     *,
     tokenizer: Tokenizer | TokenCounter | None = None,
 ) -> float:
-    """Return token reduction as a fraction from 0 to 1."""
+    """Return measured token reduction as a fraction from 0 to 1."""
     old = estimate_tokens(before, tokenizer)
     new = estimate_tokens(after, tokenizer)
     if old == 0:
@@ -360,7 +360,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     source = args.text or ""
     result = compact_text_with_metrics(source, redact_secrets=not args.keep_secrets)
-    print(result.compacted)
+    print(result.compacted, end="" if result.compacted.endswith("\n") else "\n")
     if args.verbose:
         print("\n--- Metrics ---")
         print(f"Input tokens:  {result.in_tokens}")
@@ -369,4 +369,4 @@ if __name__ == "__main__":
         print(f"Reduction:     {result.reduction_percent:.1%}")
         print(f"Token count:   {'exact' if result.token_count_is_exact else 'approximate'}")
     else:
-        print(f"\nApprox. token reduction: {result.reduction_percent:.1%}")
+        print(f"Measured token reduction: {result.reduction_percent:.1%} ({'exact' if result.token_count_is_exact else 'approximate'})")

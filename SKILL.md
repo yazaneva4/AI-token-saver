@@ -57,6 +57,25 @@ semantic summarizer.
 Never claim that the implementation performs semantic equivalence checking. It
 does not.
 
+## Memory-Level Fact Consolidation
+
+Semantic consolidation is allowed **only at the AI instruction/memory layer**,
+not as a claim about the deterministic Python compaction engine.
+
+When managing structured persistent memory:
+
+- Merge facts only when they are clearly equivalent.
+- When a new fact supersedes an old fact, store the new fact as canonical.
+- Keep old values in `HISTORY` when they explain project evolution or remain
+  useful for context.
+- Never invent equivalence. When two facts might differ in meaning, keep both.
+- Never apply semantic consolidation to executable code, commands, paths,
+  configuration, identifiers, or other exact technical content unless explicitly
+  requested.
+
+This separation keeps the AI-level memory policy and the deterministic Python
+engine from being confused with each other.
+
 ## Provider Integration
 
 When integrating with an AI provider:
@@ -135,7 +154,8 @@ When saving context:
 
 - Remove repeated information only when the repetition is safely identifiable.
 - Remove genuine filler.
-- Merge clearly equivalent facts in structured memory.
+- Merge clearly equivalent facts in structured memory only, following the
+  Memory-Level Fact Consolidation rules above.
 - Use concise wording where meaning is unchanged.
 - Keep one canonical version of each current fact.
 - Remove superseded duplicates when they no longer provide useful history.

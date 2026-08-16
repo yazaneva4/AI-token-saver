@@ -1,9 +1,9 @@
 """AI Token Saver: compact, dependency-free project context storage.
 
-The module provides deterministic text compaction, pluggable token counting,
-real-time incremental compaction, and a small JSON memory store. Reduction is
-measured using the configured tokenizer when one is supplied; otherwise the
-fallback estimator is explicitly approximate.
+The module provides conservative text compaction, pluggable token counting,
+real-time incremental compaction, secret redaction, and a small JSON memory
+store. Reduction is measured using the configured tokenizer when one is
+supplied; otherwise the fallback estimator is explicitly approximate.
 """
 
 from __future__ import annotations
@@ -82,6 +82,8 @@ def _fallback_token_count(text: str) -> int:
 
 def _token_count_with(tokenizer: Tokenizer | TokenCounter | None, text: str) -> tuple[int, bool]:
     """Count tokens with a supplied tokenizer/counter or use the fallback estimate."""
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
     if tokenizer is None:
         return _fallback_token_count(text), False
 
@@ -101,13 +103,11 @@ def _token_count_with(tokenizer: Tokenizer | TokenCounter | None, text: str) -> 
 
 def estimate_tokens(text: str, tokenizer: Tokenizer | TokenCounter | None = None) -> int:
     """Return a model-token count when a trusted tokenizer is supplied; otherwise estimate."""
-    if not isinstance(text, str):
-        raise TypeError("text must be a string")
     return _token_count_with(tokenizer, text)[0]
 
 
 def _comparison_key(line: str) -> str:
-    """Normalize only trailing whitespace for conservative exact-line deduplication."""
+    """Compare lines conservatively, ignoring only trailing whitespace."""
     return line.rstrip()
 
 
@@ -121,11 +121,13 @@ def _redact_secrets(text: str) -> str:
 
 
 def deduplicate(lines: Iterable[str]) -> list[str]:
-    """Remove duplicate lines while preserving the first line's meaningful content."""
+    """Remove exact-content duplicate lines while preserving the first occurrence."""
     result: list[str] = []
     seen: set[str] = set()
     for raw in lines:
-        line = raw.rstrip()
+        if not isinstance(raw, str):
+            raise TypeError("lines must contain only strings")
+        line = raw.rstrip("\r\n")
         if not line.strip():
             continue
         key = _comparison_key(line)
@@ -155,7 +157,7 @@ class RealtimeCompactor:
 
     def _process_line(self, raw_line: str, has_newline: bool) -> str:
         line = _redact_secrets(raw_line) if self.redact_secrets else raw_line
-        line = line.rstrip("\r\n ")
+        line = line.rstrip("\r\n")
         if not line.strip():
             return ""
         key = _comparison_key(line)
@@ -258,13 +260,10 @@ def compact_stream(
 
 
 def compact_text(text: str, *, redact_secrets: bool = True) -> str:
-    """Compact text while preserving whether the compacted result ends with a newline."""
+    """Compact text while preserving trailing whitespace and final-newline semantics."""
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    result = "".join(compact_stream([text], redact_secrets=redact_secrets))
-    if text.endswith(("\n", "\r")) and result and not result.endswith("\n"):
-        result += "\n"
-    return result
+    return "".join(compact_stream([text], redact_secrets=redact_secrets))
 
 
 def compact_text_with_metrics(
@@ -274,6 +273,8 @@ def compact_text_with_metrics(
     tokenizer: Tokenizer | TokenCounter | None = None,
 ) -> CompactionResult:
     """Compact text and return measured metrics."""
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
     compacted = compact_text(text, redact_secrets=redact_secrets)
     in_tokens, exact = _token_count_with(tokenizer, text)
     out_tokens, _ = _token_count_with(tokenizer, compacted)

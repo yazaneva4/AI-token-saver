@@ -1,4 +1,4 @@
-from sparksave import Memory, compact_text, estimate_tokens, memory_to_text, merge_memory, reduction
+from ai_token_saver import Memory, compact_text, estimate_tokens, memory_to_text, merge_memory, reduction
 
 
 def test_compact_removes_duplicates_and_filler():

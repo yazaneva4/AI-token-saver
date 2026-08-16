@@ -1,4 +1,4 @@
-from ai_token_saver import Memory, compact_text, estimate_tokens, load_memory, memory_to_text, merge_memory, reduction, save_memory
+from ai_token_saver import Memory, compact_text, compact_text_with_metrics, estimate_tokens, load_memory, memory_to_text, merge_memory, reduction, save_memory
 
 
 def test_compact_removes_duplicates_without_deleting_meaning():
@@ -64,3 +64,23 @@ def test_secret_redaction():
     assert "abc123" not in result
     assert "sk-abcdefghijklmnopqrstuvwxyz" not in result
     assert "[REDACTED]" in result
+
+
+def test_compact_text_with_metrics_returns_all_fields():
+    source = "same line\nsame line\nunique line\n"
+    result = compact_text_with_metrics(source)
+    assert result.original == source
+    assert "same line" in result.compacted
+    assert "unique line" in result.compacted
+    assert result.in_tokens > 0
+    assert result.out_tokens > 0
+    assert result.out_tokens <= result.in_tokens
+    assert 0.0 <= result.reduction_percent <= 1.0
+
+
+def test_compact_text_with_metrics_shows_real_savings():
+    repetitive = "duplicate\n" * 100 + "unique\n"
+    result = compact_text_with_metrics(repetitive)
+    # Should have high reduction due to many duplicates
+    assert result.reduction_percent > 0.9  # More than 90% reduction
+    assert result.in_tokens > result.out_tokens

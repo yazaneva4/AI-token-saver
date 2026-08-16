@@ -27,6 +27,8 @@ class CompactionResult:
     reduction_percent: float
     token_count_is_exact: bool = False
     token_count_source: str = "approximate"
+    token_change_percent: float = 0.0
+    output_grew: bool = False
 
 
 @dataclass
@@ -139,17 +141,21 @@ def _looks_like_technical_content(lines: list[str]) -> bool:
 
 def deduplicate(lines: Iterable[str], *, aggressive: bool = False) -> list[str]:
     """Remove safe redundancy while preserving technical/code-like content."""
+    source = list(lines)
+    if any(not isinstance(line, str) for line in source):
+        raise TypeError("lines must contain only strings")
+    if _looks_like_technical_content(source):
+        return [line.rstrip("\r\n") for line in source if line.rstrip("\r\n").strip()]
+
     result: list[str] = []
     seen: set[str] = set()
     previous_key: str | None = None
-    for raw in lines:
-        if not isinstance(raw, str):
-            raise TypeError("lines must contain only strings")
+    for raw in source:
         line = raw.rstrip("\r\n")
         if not line.strip():
             continue
         key = _line_key(line)
-        duplicate = key == previous_key if not aggressive else key in seen
+        duplicate = key in seen if aggressive else key == previous_key
         if not duplicate:
             result.append(line)
             seen.add(key)
@@ -162,17 +168,16 @@ def _compact_lines(text: str, *, redact_mode: RedactionMode, aggressive: bool = 
     lines = text.splitlines()
     technical = _looks_like_technical_content(lines)
     cleaned = [_redact_secrets(line, redact_mode) if redact_mode != "off" else line for line in lines]
-    if technical:
-        result = "\n".join(cleaned)
-    else:
-        result = "\n".join(deduplicate(cleaned, aggressive=aggressive))
+    result = "\n".join(cleaned) if technical else "\n".join(deduplicate(cleaned, aggressive=aggressive))
     if had_final_newline and result:
         result += "\n"
     return result
 
 
 class RealtimeCompactor:
-    """Compact complete lines as chunks arrive while protecting detected code."""
+    """Compact complete lines while protecting code detected later in a stream."""
+
+    _LOOKAHEAD_LINES = 4
 
     def __init__(self, *, redact_secrets: bool = True, redaction_mode: RedactionMode | None = None, tokenizer: TokenizerLike | None = None, aggressive: bool = False) -> None:
         if redaction_mode is None:
@@ -187,22 +192,39 @@ class RealtimeCompactor:
         self._technical = False
         self._original_parts: list[str] = []
         self._output_parts: list[str] = []
+        self._pending_lines: list[tuple[str, str]] = []
         self.finished = False
+
+    def _flush_pending(self, *, force: bool = False) -> str:
+        if not self._pending_lines:
+            return ""
+        snapshot = [line for line, _ in self._pending_lines]
+        if _looks_like_technical_content(snapshot):
+            self._technical = True
+        if not self._technical and not force and len(self._pending_lines) < self._LOOKAHEAD_LINES:
+            return ""
+
+        pending = self._pending_lines
+        self._pending_lines = []
+        output: list[str] = []
+        for line, newline in pending:
+            key = _line_key(line)
+            duplicate = False if self._technical else (key in self._seen if self.aggressive else key == self._previous_key)
+            self._previous_key = key
+            if duplicate:
+                continue
+            self._seen.add(key)
+            value = line + newline
+            self._output_parts.append(value)
+            output.append(value)
+        return "".join(output)
 
     def _process_line(self, raw_line: str, newline: str) -> str:
         line = _redact_secrets(raw_line, self.redaction_mode).rstrip("\r\n")
         if not line.strip():
             return ""
-        self._technical = self._technical or _looks_like_technical_content([line])
-        key = _line_key(line)
-        duplicate = False if self._technical else (key in self._seen if self.aggressive else key == self._previous_key)
-        self._previous_key = key
-        if duplicate:
-            return ""
-        self._seen.add(key)
-        output = line + newline
-        self._output_parts.append(output)
-        return output
+        self._pending_lines.append((line, newline))
+        return self._flush_pending()
 
     def feed(self, chunk: str) -> str:
         if self.finished:
@@ -240,11 +262,12 @@ class RealtimeCompactor:
         if self.finished:
             return ""
         self.finished = True
-        if not self._buffer:
-            return ""
-        final = self._process_line(self._buffer, "")
-        self._buffer = ""
-        return final
+        output: list[str] = []
+        if self._buffer:
+            output.append(self._process_line(self._buffer, ""))
+            self._buffer = ""
+        output.append(self._flush_pending(force=True))
+        return "".join(output)
 
     @property
     def original(self) -> str:
@@ -274,10 +297,29 @@ class RealtimeCompactor:
     def reduction_percent(self) -> float:
         return reduction(self.original, self.compacted, tokenizer=self.tokenizer)
 
+    @property
+    def token_change_percent(self) -> float:
+        old = self.in_tokens
+        return 0.0 if old == 0 else (1.0 - self.out_tokens / old) * 100.0
+
+    @property
+    def output_grew(self) -> bool:
+        return self.out_tokens > self.in_tokens
+
     def result(self) -> CompactionResult:
         if not self.finished:
             raise RuntimeError("Call finish() before requesting the final result")
-        return CompactionResult(self.original, self.compacted, self.in_tokens, self.out_tokens, self.reduction_percent, self.token_count_is_exact, self.token_count_source)
+        return CompactionResult(
+            self.original,
+            self.compacted,
+            self.in_tokens,
+            self.out_tokens,
+            self.reduction_percent,
+            self.token_count_is_exact,
+            self.token_count_source,
+            self.token_change_percent,
+            self.output_grew,
+        )
 
 
 def compact_stream(chunks: Iterable[str], *, redact_secrets: bool = True, redaction_mode: RedactionMode | None = None, tokenizer: TokenizerLike | None = None, aggressive: bool = False) -> Iterator[str]:
@@ -308,7 +350,17 @@ def compact_text_with_metrics(text: str, *, redact_secrets: bool = True, redacti
     compacted = compact_text(text, redact_secrets=redact_secrets, redaction_mode=redaction_mode, aggressive=aggressive)
     in_tokens, exact, source = _token_count_with(tokenizer, text)
     out_tokens, _, _ = _token_count_with(tokenizer, compacted)
-    return CompactionResult(text, compacted, in_tokens, out_tokens, reduction(text, compacted, tokenizer=tokenizer), exact, source)
+    return CompactionResult(
+        text,
+        compacted,
+        in_tokens,
+        out_tokens,
+        reduction(text, compacted, tokenizer=tokenizer),
+        exact,
+        source,
+        0.0 if in_tokens == 0 else (1.0 - out_tokens / in_tokens) * 100.0,
+        out_tokens > in_tokens,
+    )
 
 
 def reduction(before: str, after: str, *, tokenizer: TokenizerLike | None = None) -> float:
@@ -391,6 +443,8 @@ if __name__ == "__main__":
         print(f"Output tokens: {result.out_tokens}")
         print(f"Saved tokens:  {result.in_tokens - result.out_tokens}")
         print(f"Reduction:     {result.reduction_percent:.1%}")
+        print(f"Token change:  {result.token_change_percent:+.1f}%")
+        print(f"Output grew:   {result.output_grew}")
         print(f"Token count:   {result.token_count_source}")
     else:
         print(f"Measured token reduction: {result.reduction_percent:.1%} ({result.token_count_source})")

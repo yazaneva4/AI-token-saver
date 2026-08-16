@@ -4,7 +4,7 @@ A compact, model-agnostic token and context-saving tool designed to work with **
 
 ## What it does
 
-AI Token Saver targets **about 55% fewer context/memory tokens** when the input contains repetition or filler. The 55% figure is a target, not a guarantee.
+AI Token Saver targets **up to about 99% fewer context/memory tokens** when the input contains substantial repetition or filler. The 99% figure is a target, not a guarantee, and the tool must never remove information merely to reach a percentage.
 
 It provides:
 
@@ -15,7 +15,6 @@ It provides:
 - 📏 Approximate before/after token estimation
 - 🤖 Model/provider-agnostic skill instructions
 - 🔌 Designed to adapt to different AI assistants and coding agents
-- 🪨 Compatible with the Caveman skill without overriding it
 - 🔐 Secret-looking values are redacted by default during text compaction
 
 ## Available for AI assistants
@@ -28,22 +27,6 @@ skills, instructions, memory, or context files.
 
 Different AI platforms may have different skill formats and capabilities, so the
 installation method can vary. The core memory-saving rules remain provider-agnostic.
-
-## Recommended setup
-
-**Recommended for the best experience:** use **AI Token Saver + Caveman** together
-when your AI platform supports both skills.
-
-- **AI Token Saver** 💾 — reduces saved context and memory overhead.
-- **Caveman** 🪨 — compresses assistant response style and helps reduce output tokens.
-
-They have different jobs and can work together without either skill disabling the other.
-
-### Caveman disclaimer
-
-**Caveman is NOT made by me and is NOT part of AI Token Saver. Caveman was made
-by JuliusBrussee.** This project only recommends and documents compatibility with
-Caveman as an optional complementary skill. All Caveman credit belongs to its creator.
 
 ## Files
 
@@ -70,8 +53,8 @@ structured memory, persistence, merging, rendering, and default secret redaction
 Clone the repository and run:
 
 ```bash
-git clone https://github.com/yazaneva4/Claude-token-saver.git
-cd Claude-token-saver
+git clone https://github.com/yazaneva4/AI-token-saver.git
+cd AI-token-saver
 python ai_token_saver.py "We need to save the project state.\nThe project state is important.\nThe project state is important."
 ```
 

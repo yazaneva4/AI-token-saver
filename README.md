@@ -6,18 +6,61 @@ A compact, model-agnostic token and context-saving tool designed to work with **
 
 AI Token Saver performs **real, measured compaction**. It removes duplicate lines and unnecessary whitespace while preserving meaningful content, then reports the approximate reduction it actually achieved.
 
+It now also supports **real-time incremental compaction**: chunks can be fed as they arrive, and newly completed unique lines are emitted immediately instead of waiting for the complete input.
+
 For highly repetitive input, the implementation can reach **up to about 99% reduction**. **99% is not a guaranteed result for every input**—if the input contains little redundancy, the real saving will be much smaller. The tool never deletes information just to make the percentage look better.
 
 It provides:
 
 - 🧠 Compact project-memory structures
 - ♻️ Duplicate removal without deleting meaningful phrases
+- ⚡ Real-time incremental/streaming compaction
 - 📦 Stable, structured JSON memory storage
 - 🔀 Memory merging and deduplication
 - 📏 Actual before/after reduction measurement with in/out token counts
 - 🤖 Model/provider-agnostic skill instructions
 - 🔌 Designed to adapt to different AI assistants and coding agents
 - 🔐 Secret-looking values are redacted by default during text compaction
+
+## Real-time usage
+
+Use `RealtimeCompactor` when data arrives incrementally:
+
+```python
+from ai_token_saver import RealtimeCompactor
+
+compactor = RealtimeCompactor()
+
+# Call this whenever a new chunk arrives from a stream/socket/model.
+output = compactor.feed("first line\nsecond")
+if output:
+    print(output, end="", flush=True)
+
+output = compactor.feed(" line\nfirst line\nthird line")
+if output:
+    print(output, end="", flush=True)
+
+# Flush the final partial line when the stream ends.
+output = compactor.finish()
+if output:
+    print(output, end="", flush=True)
+
+result = compactor.result()
+print(f"Reduction: {result.reduction_percent:.1%}")
+```
+
+Chunks may split in the middle of a line. The compactor buffers only the incomplete
+final line, emits completed unique lines as soon as they arrive, and keeps cumulative
+metrics. It does not need to wait for the full input.
+
+For iterable streams, use `compact_stream()`:
+
+```python
+from ai_token_saver import compact_stream
+
+for compacted_chunk in compact_stream(incoming_chunks):
+    send_to_ai(compacted_chunk)
+```
 
 ## Available for AI assistants
 
@@ -47,8 +90,9 @@ Provider-agnostic skill instructions for saving and compressing AI context.
 
 ### `ai_token_saver.py`
 
-The Python implementation for text compaction, approximate token estimation,
-structured memory, persistence, merging, rendering, and default secret redaction.
+The Python implementation for text compaction, real-time incremental compaction,
+approximate token estimation, structured memory, persistence, merging, rendering,
+and default secret redaction.
 
 ## Quick start
 
@@ -101,8 +145,9 @@ print(memory_to_text(memory))
 python -m pytest
 ```
 
-The test suite covers duplicate removal, meaning preservation, reduction bounds,
-memory merging, JSON round-tripping, malformed-memory handling, and secret redaction.
+The test suite covers duplicate removal, meaning preservation, code indentation,
+reduction bounds, memory merging, JSON round-tripping, malformed-memory handling,
+secret redaction, and real-time chunked compaction.
 
 ## Token-saving philosophy
 

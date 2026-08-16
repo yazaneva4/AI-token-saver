@@ -4,7 +4,9 @@ A compact, model-agnostic token and context-saving tool designed to work with **
 
 ## What it does
 
-AI Token Saver targets **up to about 99% fewer context/memory tokens** when the input contains substantial repetition or filler. The 99% figure is a target, not a guarantee, and the tool must never remove information merely to reach a percentage.
+AI Token Saver performs **real, measured compaction**. It removes duplicate lines and unnecessary whitespace while preserving meaningful content, then reports the approximate reduction it actually achieved.
+
+For highly repetitive input, the implementation can reach **up to about 99% reduction**. **99% is not a guaranteed result for every input**—if the input contains little redundancy, the real saving will be much smaller. The tool never deletes information just to make the percentage look better.
 
 It provides:
 
@@ -12,7 +14,7 @@ It provides:
 - ♻️ Duplicate removal without deleting meaningful phrases
 - 📦 Stable, structured JSON memory storage
 - 🔀 Memory merging and deduplication
-- 📏 Approximate before/after token estimation
+- 📏 Actual before/after reduction measurement
 - 🤖 Model/provider-agnostic skill instructions
 - 🔌 Designed to adapt to different AI assistants and coding agents
 - 🔐 Secret-looking values are redacted by default during text compaction
@@ -58,19 +60,22 @@ cd AI-token-saver
 python ai_token_saver.py "We need to save the project state.\nThe project state is important.\nThe project state is important."
 ```
 
-The command prints compacted text and an approximate reduction percentage.
+The command prints the compacted text and the **measured approximate reduction**
+for that input.
 
 ## Python usage
 
 ```python
-from ai_token_saver import Memory, compact_text, memory_to_text
+from ai_token_saver import Memory, compact_text, memory_to_text, reduction
 
 text = """We need to save the project state.
 We need to save the project state.
 OpenSpark is the current project.
 """
 
-print(compact_text(text))
+compacted = compact_text(text)
+print(compacted)
+print(f"Reduction: {reduction(text, compacted):.1%}")
 
 memory = Memory(
     project="OpenSpark",
@@ -101,6 +106,7 @@ AI Token Saver does **not** blindly delete context to hit a percentage. It prior
 4. Preserving exact technical identifiers, paths, commands, models, versions,
    bugs, decisions, constraints, and next steps.
 5. Keeping useful history only when it helps explain a change.
+6. Reporting the reduction actually achieved instead of claiming a fixed saving.
 
 The goal is **less context, not less meaning**.
 

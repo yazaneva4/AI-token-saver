@@ -101,11 +101,14 @@ def _token_count_with(tokenizer: Tokenizer | TokenCounter | None, text: str) -> 
 
 def estimate_tokens(text: str, tokenizer: Tokenizer | TokenCounter | None = None) -> int:
     """Return a model-token count when a trusted tokenizer is supplied; otherwise estimate."""
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
     return _token_count_with(tokenizer, text)[0]
 
 
 def _comparison_key(line: str) -> str:
-    return _SPACE.sub(" ", line.strip()).casefold()
+    """Normalize only trailing whitespace for conservative exact-line deduplication."""
+    return line.rstrip()
 
 
 def _redact_secrets(text: str) -> str:
@@ -291,6 +294,8 @@ def reduction(
     tokenizer: Tokenizer | TokenCounter | None = None,
 ) -> float:
     """Return measured token reduction as a fraction from 0 to 1."""
+    if not isinstance(before, str) or not isinstance(after, str):
+        raise TypeError("before and after must be strings")
     old = estimate_tokens(before, tokenizer)
     new = estimate_tokens(after, tokenizer)
     if old == 0:

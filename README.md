@@ -55,7 +55,7 @@ Caveman as an optional complementary skill. All Caveman credit belongs to its cr
 ```text
 AI-token-saver/
 ├── SKILL.md
-├── sparksave.py
+├── ai_token_saver.py
 ├── README.md
 └── tests/
     └── test_sparksave.py
@@ -65,7 +65,7 @@ AI-token-saver/
 
 Provider-agnostic skill instructions for saving and compressing AI context.
 
-### `sparksave.py`
+### `ai_token_saver.py`
 
 The Python implementation for text compaction, token estimation, structured
 memory, persistence, merging, and rendering.
@@ -77,7 +77,7 @@ Clone the repository and run:
 ```bash
 git clone https://github.com/yazaneva4/Claude-token-saver.git
 cd Claude-token-saver
-python sparksave.py "We need to save the project state.\nThe project state is important.\nThe project state is important."
+python ai_token_saver.py "We need to save the project state.\nThe project state is important.\nThe project state is important."
 ```
 
 The command prints compacted text and an approximate reduction percentage.
@@ -85,7 +85,7 @@ The command prints compacted text and an approximate reduction percentage.
 ## Python usage
 
 ```python
-from sparksave import Memory, compact_text, memory_to_text
+from ai_token_saver import Memory, compact_text, memory_to_text
 
 text = """We need to save the project state.
 We need to save the project state.

@@ -63,9 +63,16 @@ _SECRET_PATTERNS = (
 
 _CODE_HINTS = (
     "```", "#!/", "import ", "from ", "def ", "class ", "function ", "const ",
-    "let ", "var ", "if ", "for ", "while ", "return ", "SELECT ", "INSERT ",
-    "curl ", "npm ", "pip ", "python ", "powershell ", "docker ", "kubectl ",
-    "{", "}", "[", "]", "=>", "::", "&&", "||", "./", "../", "\\",
+    "let ", "var ", "return ", "SELECT ", "INSERT ", "curl ", "npm ", "pip ",
+    "python ", "powershell ", "docker ", "kubectl ", "=>", "::", "&&", "||", "./", "../",
+)
+_CODE_SYNTAX = re.compile(
+    r"^\s*(?:"
+    r"(?:def|class)\s+\w+.*:\s*$|"
+    r"(?:if|for|while)\b.*:\s*$|"
+    r"(?:import|from)\s+\S+|"
+    r"return\b"
+    r")"
 )
 
 
@@ -124,9 +131,10 @@ def _looks_like_technical_content(lines: list[str]) -> bool:
         return False
     if "```" in sample:
         return True
+    if any(_CODE_SYNTAX.match(line) for line in lines[:80]):
+        return True
     hints = sum(1 for hint in _CODE_HINTS if hint in sample)
-    syntax_lines = sum(1 for line in lines[:80] if re.search(r"^\s*(?:def|class|if|for|while|return|import|from)\b|[{};]$", line))
-    return hints >= 2 or syntax_lines >= 2
+    return hints >= 2
 
 
 def deduplicate(lines: Iterable[str], *, aggressive: bool = False) -> list[str]:
@@ -153,25 +161,18 @@ def _compact_lines(text: str, *, redact_mode: RedactionMode, aggressive: bool = 
     had_final_newline = text.endswith(("\n", "\r"))
     lines = text.splitlines()
     technical = _looks_like_technical_content(lines)
-    cleaned = [
-        _redact_secrets(line, redact_mode) if redact_mode != "off" else line
-        for line in lines
-    ]
-
-    # Technical content is loss-sensitive: preserve every line, including
-    # intentional duplicates and blank lines. Only secret redaction is applied.
+    cleaned = [_redact_secrets(line, redact_mode) if redact_mode != "off" else line for line in lines]
     if technical:
         result = "\n".join(cleaned)
     else:
         result = "\n".join(deduplicate(cleaned, aggressive=aggressive))
-
     if had_final_newline and result:
         result += "\n"
     return result
 
 
 class RealtimeCompactor:
-    """Compact complete lines as chunks arrive, buffering only an incomplete line."""
+    """Compact complete lines as chunks arrive while protecting detected code."""
 
     def __init__(self, *, redact_secrets: bool = True, redaction_mode: RedactionMode | None = None, tokenizer: TokenizerLike | None = None, aggressive: bool = False) -> None:
         if redaction_mode is None:
@@ -189,18 +190,12 @@ class RealtimeCompactor:
         self.finished = False
 
     def _process_line(self, raw_line: str, newline: str) -> str:
-        line = _redact_secrets(raw_line, self.redaction_mode)
-        line = line.rstrip("\r\n")
+        line = _redact_secrets(raw_line, self.redaction_mode).rstrip("\r\n")
         if not line.strip():
             return ""
         self._technical = self._technical or _looks_like_technical_content([line])
         key = _line_key(line)
-        if self._technical:
-            duplicate = False
-        elif self.aggressive:
-            duplicate = key in self._seen
-        else:
-            duplicate = key == self._previous_key
+        duplicate = False if self._technical else (key in self._seen if self.aggressive else key == self._previous_key)
         self._previous_key = key
         if duplicate:
             return ""
@@ -225,17 +220,17 @@ class RealtimeCompactor:
             char = self._buffer[i]
             if char == "\n":
                 raw_end = i - 1 if i > start and self._buffer[i - 1] == "\r" else i
-                output.append(self._process_line(self._buffer[start:raw_end], newline="\n"))
+                output.append(self._process_line(self._buffer[start:raw_end], "\n"))
                 start = i + 1
             elif char == "\r":
                 if i + 1 >= len(self._buffer):
                     break
                 if self._buffer[i + 1] == "\n":
-                    output.append(self._process_line(self._buffer[start:i], newline="\n"))
+                    output.append(self._process_line(self._buffer[start:i], "\n"))
                     start = i + 2
                     i += 1
                 else:
-                    output.append(self._process_line(self._buffer[start:i], newline="\n"))
+                    output.append(self._process_line(self._buffer[start:i], "\n"))
                     start = i + 1
             i += 1
         self._buffer = self._buffer[start:]
@@ -247,7 +242,7 @@ class RealtimeCompactor:
         self.finished = True
         if not self._buffer:
             return ""
-        final = self._process_line(self._buffer, newline="")
+        final = self._process_line(self._buffer, "")
         self._buffer = ""
         return final
 

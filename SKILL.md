@@ -2,9 +2,9 @@
 name: ai-token-saver
 description: >
   Token-efficient persistent context and memory skill for any AI assistant.
-  Compresses saved context toward a 55% token reduction while preserving meaning,
-  technical accuracy, and important details. Works alongside other skills without
-  blocking or overriding them.
+  Compresses saved context toward an up-to-99% token reduction when repetition
+  or filler allows, while preserving meaning, technical accuracy, and important
+  details. Works alongside other skills without blocking or overriding them.
 ---
 
 # AI Token Saver
@@ -14,10 +14,10 @@ description: >
 Save important project context in compact form so any AI assistant can continue
 work accurately while using less context.
 
-Target: approximately **55% fewer context/memory tokens** than an uncompressed
-memory dump.
+Target: **up to about 99% fewer context/memory tokens** when the input contains
+substantial repetition or filler.
 
-55% is a target, not a guarantee. Never remove information merely to hit the
+99% is a target, not a guarantee. Never remove information merely to hit the
 target if doing so would change meaning or break future work.
 
 ## Core Rules
@@ -36,11 +36,12 @@ target if doing so would change meaning or break future work.
    other secrets.
 10. Do not save temporary chatter unless explicitly requested.
 
-## 55% Token Optimization
+## 99% Token Optimization
 
 When saving context:
 
-- Remove filler and repeated explanations.
+- Remove repeated information.
+- Remove unnecessary filler and whitespace.
 - Merge related facts.
 - Use concise wording.
 - Keep one canonical version of each current fact.
@@ -53,19 +54,9 @@ When saving context:
 - Do not compress code, commands, paths, model names, or error strings when
   exact text matters.
 
-Goal:
-
-UNCOMPRESSED CONTEXT
-        ↓
-deduplicate
-        ↓
-merge
-        ↓
-remove filler
-        ↓
-compact structure
-        ↓
-~55% fewer context tokens
+The 99% figure is a maximum target for cases where the source contains enough
+redundancy to support that level of reduction. It is not a promise of 99%
+reduction on every input.
 
 ## Universal AI Compatibility
 

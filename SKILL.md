@@ -33,8 +33,7 @@ information merely to reach a percentage.
 7. Prefer compact structured records over repeated prose.
 8. Replace clearly outdated values with current values while retaining useful
    history when needed.
-9. Never store passwords, API keys, authentication codes, private tokens, or
-   other secrets.
+9. Never store credentials or secrets in ordinary memory by default.
 10. Do not save temporary chatter unless explicitly requested.
 
 ## Safe Compaction
@@ -73,8 +72,46 @@ When managing structured persistent memory:
   configuration, identifiers, or other exact technical content unless explicitly
   requested.
 
-This separation keeps the AI-level memory policy and the deterministic Python
-engine from being confused with each other.
+## Secret and Credential Storage
+
+Normal `/save` and `/save-all` operations MUST NOT store passwords, API keys,
+access tokens, authentication codes, master passwords, private credentials, or
+other secrets in ordinary memory.
+
+An explicitly requested secret operation may store a project credential **only
+when the host provides secure secret storage**.
+
+### `/save secret`
+
+Use `/save secret` only when the user explicitly asks to store a specific
+credential for future use.
+
+Rules:
+
+- Never infer permission to save a secret from `/save` alone.
+- Store the secret only through secure host-provided secret storage.
+- Never write the secret into `memory.json`, ordinary context files, logs,
+  prompts, skill files, Git commits, exports, or other plaintext memory.
+- Do not echo the credential back in the confirmation response.
+- Do not expose stored secrets through normal `/memory`.
+- Associate the secret with a clear project/name label and store only what is
+  necessary.
+- If secure secret storage is unavailable, do not save the secret and state that
+  secure storage is required.
+
+### `/memory secret`
+
+A secret may be retrieved only after an explicit user request and only when the
+host can safely provide the stored credential. Never display secrets as part of
+ordinary `/memory` output.
+
+### `/forget secret`
+
+Explicitly remove a stored project credential when secure secret storage supports
+that operation.
+
+Never treat API keys, passwords, or credentials as ordinary context merely because
+they are important to the project.
 
 ## Provider Integration
 
@@ -238,15 +275,31 @@ Save all **important persistent** context available from the current
 conversation, then deduplicate and compress it. Do not interpret “all” as
 permission to save secrets or temporary chatter.
 
+### /save secret
+
+Explicitly request secure storage of a specific project credential. This command
+is available only when the host provides secure secret storage. Never fall back to
+ordinary memory storage for credentials.
+
 ### /memory
 
-Show relevant saved context in compact form.
+Show relevant saved context in compact form. Secrets are excluded by default.
+
+### /memory secret
+
+Explicitly request a stored project credential when secure secret storage is
+available. Never display credentials as part of ordinary `/memory`.
 
 ### /forget
 
 Forget the specific information requested by the user.
 
 If the target is ambiguous, ask before deleting.
+
+### /forget secret
+
+Remove an explicitly stored project credential when secure secret storage supports
+that operation.
 
 ### /stop-saving
 
@@ -283,7 +336,7 @@ PREFERENCES:
 
 UPDATED: <date if known>
 
-Only include sections that contain useful information.
+Do not include secrets in this ordinary memory structure.
 
 ## Updating Existing Memory
 
@@ -320,13 +373,19 @@ LOW:
 
 ## Safety
 
-Never save:
+Never save credentials into ordinary persistent memory.
+
+Credentials include:
 
 - Passwords
 - API keys
 - Access tokens
 - Authentication codes
 - Private credentials
+- Master passwords
+
+An explicit `/save secret` request does not make plaintext memory safe. Secure
+host-provided secret storage is still required.
 
 You may save non-secret status such as:
 "API key configured."
@@ -341,12 +400,16 @@ After `/save-all`, if the host supports the command:
 
 "Saved. Context deduplicated and compressed."
 
+After `/save secret`, do not echo the credential. Confirm only that the secure
+secret-store operation succeeded, or clearly state that secure storage is
+unavailable.
+
 Do not dump the entire memory unless the user asks for `/memory`.
 
 ## Persistence Honesty
 
 This skill defines memory behavior. It does not guarantee that the host application
-actually provides persistent storage.
+actually provides persistent storage or secure secret storage.
 
-If persistent storage is unavailable, say so instead of pretending memory was saved
-permanently.
+If persistent storage or secure secret storage is unavailable, say so instead of
+pretending the information was saved permanently.

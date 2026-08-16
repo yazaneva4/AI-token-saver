@@ -30,14 +30,14 @@ def test_realtime_code_guard_works_when_code_marker_arrives_in_later_chunk():
 
 def test_metrics_report_output_growth_after_redaction():
     text = "secret=abc"
-    result = compact_text_with_metrics(text, redact_secrets=True)
+    result = compact_text_with_metrics(text, redact_secrets=True, tokenizer=lambda value: len(value))
     assert result.output_grew
-    assert result.token_change_percent <= 0
+    assert result.token_change_percent < 0
 
 
 def test_metrics_report_real_savings_as_positive_change():
     text = "hello\nhello\nhello\n"
-    result = compact_text_with_metrics(text, redact_secrets=False)
+    result = compact_text_with_metrics(text, redact_secrets=False, tokenizer=lambda value: len(value))
     assert not result.output_grew
     assert result.token_change_percent > 0
     assert result.reduction_percent > 0

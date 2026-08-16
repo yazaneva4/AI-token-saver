@@ -2,9 +2,10 @@
 name: ai-token-saver
 description: >
   Token-efficient persistent context and memory skill for any AI assistant.
-  Compresses saved context toward an up-to-99% token reduction when repetition
-  or filler allows, while preserving meaning, technical accuracy, and important
-  details. Works alongside other skills without blocking or overriding them.
+  Compresses saved context toward an up-to-99% reduction when repetition or
+  filler allows, while preserving meaning, technical accuracy, and important
+  details. Supports real-time incremental compaction and optional exact token
+  counting when the host provides the target model's tokenizer.
 ---
 
 # AI Token Saver
@@ -36,6 +37,20 @@ target if doing so would change meaning or break future work.
    other secrets.
 10. Do not save temporary chatter unless explicitly requested.
 
+## Token Measurement
+
+AI Token Saver supports two measurement modes:
+
+- **Exact mode:** when the host provides the tokenizer used by the target model,
+  pass that tokenizer or a token-counting function to the implementation. The
+  reported input/output counts and reduction then use that tokenizer.
+- **Fallback mode:** when no tokenizer is supplied, the implementation uses a
+  dependency-free character-based estimate. This is explicitly approximate and
+  must never be presented as an exact model-token count.
+
+Never claim a fixed percentage of savings from the fallback estimate. Always
+report the reduction actually measured for the specific input.
+
 ## 99% Token Optimization
 
 When saving context:
@@ -57,6 +72,22 @@ When saving context:
 The 99% figure is a maximum target for cases where the source contains enough
 redundancy to support that level of reduction. It is not a promise of 99%
 reduction on every input.
+
+## Real-Time Compaction
+
+When the implementation is available, context may be processed incrementally
+as chunks arrive instead of waiting for the complete input.
+
+- Feed incoming chunks to the real-time compactor.
+- Keep incomplete final lines buffered until their content is complete.
+- Emit newly completed unique lines as soon as they can be safely processed.
+- Preserve the first occurrence's exact meaningful content.
+- Flush the final partial line when the stream finishes.
+- Do not claim that real-time compaction is character-level or token-level when
+  the implementation is using safe line-level buffering.
+
+Real-time compaction does not automatically connect to a provider's streaming
+API. A provider-specific adapter may be required by the host application.
 
 ## Universal AI Compatibility
 

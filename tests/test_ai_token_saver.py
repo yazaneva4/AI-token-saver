@@ -13,7 +13,7 @@ from ai_token_saver import (
 )
 
 
-def test_compact_removes_duplicates_without_deleting_meaning():
+def test_compact_removes_adjacent_duplicates_without_deleting_meaning():
     source = """Now, we need to save the project state.
 We need to save the project state.
 The current router is OpenSpark.
@@ -26,19 +26,32 @@ The current router is OpenSpark.
     assert result.endswith("\n")
 
 
-def test_compaction_preserves_code_indentation_and_final_newline():
+def test_non_adjacent_duplicate_code_lines_are_preserved():
     source = """def hello():
     print(\"hello\")
     print(\"hello\")
 """
     result = compact_text(source, redact_secrets=False)
-    assert result == "def hello():\n    print(\"hello\")\n"
-    assert result.startswith("def hello():\n    ")
+    assert result == source
 
 
 def test_compaction_preserves_no_final_newline():
     source = "same\nsame"
     assert compact_text(source, redact_secrets=False) == "same"
+
+
+def test_aggressive_mode_does_not_globally_deduplicate_technical_content():
+    source = """def hello():
+    print(\"hello\")
+    print(\"hello\")
+"""
+    assert compact_text(source, redact_secrets=False, aggressive=True) == source
+
+
+def test_aggressive_mode_can_deduplicate_repetitive_prose():
+    source = "one fact\ntwo facts\none fact\n"
+    result = compact_text(source, redact_secrets=False, aggressive=True)
+    assert result == "one fact\ntwo facts\n"
 
 
 def test_reduction_is_bounded():
@@ -94,6 +107,26 @@ def test_secret_redaction():
     assert "[REDACTED]" in result
 
 
+def test_redaction_modes():
+    source = "api_key=SECRET123 AIKey=AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+    common = compact_text(source, redaction_mode="common")
+    strict = compact_text(source, redaction_mode="strict")
+    off = compact_text(source, redaction_mode="off")
+    assert "SECRET123" not in common
+    assert "AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456" in common
+    assert "AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456" not in strict
+    assert "SECRET123" in off
+
+
+def test_invalid_redaction_mode_is_rejected():
+    try:
+        compact_text("hello", redaction_mode="invalid")  # type: ignore[arg-type]
+    except ValueError as exc:
+        assert "redaction_mode" in str(exc)
+    else:
+        raise AssertionError("invalid redaction mode must be rejected")
+
+
 def test_compact_text_with_metrics_returns_all_fields():
     source = "same line\nsame line\nunique line\n"
     result = compact_text_with_metrics(source)
@@ -105,6 +138,7 @@ def test_compact_text_with_metrics_returns_all_fields():
     assert result.out_tokens <= result.in_tokens
     assert 0.0 <= result.reduction_percent <= 1.0
     assert result.token_count_is_exact is False
+    assert result.token_count_source == "approximate"
 
 
 def test_compact_text_with_metrics_shows_real_savings():
@@ -125,10 +159,11 @@ def test_exact_token_counter_is_used_and_marked_exact():
     assert result.in_tokens == 5
     assert result.out_tokens == 3
     assert result.token_count_is_exact is True
+    assert result.token_count_source == "supplied-tokenizer"
     assert result.reduction_percent == 0.4
 
 
-def test_realtime_compactor_handles_split_chunks_and_deduplicates():
+def test_realtime_compactor_handles_split_chunks_and_deduplicates_adjacent_lines():
     compactor = RealtimeCompactor(redact_secrets=False)
     assert compactor.feed("hello\nhel") == "hello\n"
     assert compactor.feed("lo\nhello\nworld") == ""
@@ -137,11 +172,11 @@ def test_realtime_compactor_handles_split_chunks_and_deduplicates():
     assert compactor.original == "hello\nhello\nhello\nworld"
 
 
-def test_realtime_compactor_preserves_code_indentation():
+def test_realtime_compactor_preserves_repeated_code_lines():
     compactor = RealtimeCompactor(redact_secrets=False)
     emitted = compactor.feed("def hello():\n    print(\"hello\")\n    print(\"hello\")")
     emitted += compactor.finish()
-    assert emitted == "def hello():\n    print(\"hello\")\n"
+    assert emitted == "def hello():\n    print(\"hello\")\n    print(\"hello\")"
 
 
 def test_realtime_compactor_reports_metrics_after_finish():

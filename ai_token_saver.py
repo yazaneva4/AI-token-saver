@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field, fields
 import json
 from pathlib import Path
 import re
-from typing import Callable, Iterable, Iterator, Mapping, Protocol
+from typing import Callable, Iterable, Iterator, Literal, Mapping, Protocol
 
 
 class Tokenizer(Protocol):
@@ -15,6 +15,7 @@ class Tokenizer(Protocol):
 
 TokenCounter = Callable[[str], int]
 TokenizerLike = Tokenizer | TokenCounter
+RedactionMode = Literal["off", "common", "strict"]
 
 
 @dataclass
@@ -25,6 +26,7 @@ class CompactionResult:
     out_tokens: int
     reduction_percent: float
     token_count_is_exact: bool = False
+    token_count_source: str = "approximate"
 
 
 @dataclass
@@ -59,16 +61,23 @@ _SECRET_PATTERNS = (
     re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"),
 )
 
+_CODE_HINTS = (
+    "```", "#!/", "import ", "from ", "def ", "class ", "function ", "const ",
+    "let ", "var ", "if ", "for ", "while ", "return ", "SELECT ", "INSERT ",
+    "curl ", "npm ", "pip ", "python ", "powershell ", "docker ", "kubectl ",
+    "{", "}", "[", "]", "=>", "::", "&&", "||", "./", "../", "\\",
+)
+
 
 def _fallback_token_count(text: str) -> int:
     return 0 if not text.strip() else max(1, round(len(text) / 4))
 
 
-def _token_count_with(tokenizer: TokenizerLike | None, text: str) -> tuple[int, bool]:
+def _token_count_with(tokenizer: TokenizerLike | None, text: str) -> tuple[int, bool, str]:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     if tokenizer is None:
-        return _fallback_token_count(text), False
+        return _fallback_token_count(text), False, "approximate"
     if callable(tokenizer) and not hasattr(tokenizer, "encode"):
         count = tokenizer(text)
     else:
@@ -81,32 +90,54 @@ def _token_count_with(tokenizer: TokenizerLike | None, text: str) -> tuple[int, 
         raise TypeError("token counter must return an integer")
     if count < 0:
         raise ValueError("token count cannot be negative")
-    return count, True
+    return count, True, "supplied-tokenizer"
 
 
 def estimate_tokens(text: str, tokenizer: TokenizerLike | None = None) -> int:
     return _token_count_with(tokenizer, text)[0]
 
 
-def _redact_secrets(text: str) -> str:
+def _redact_secrets(text: str, mode: RedactionMode = "common") -> str:
+    if mode == "off":
+        return text
     result = text
     for pattern in _SECRET_PATTERNS[:2]:
         result = pattern.sub(lambda m: m.group(1) + "[REDACTED]", result)
-    return _SECRET_PATTERNS[2].sub("[REDACTED]", result) if result else result
+    result = _SECRET_PATTERNS[2].sub("[REDACTED]", result)
+    if mode == "strict":
+        result = _SECRET_PATTERNS[3].sub("[REDACTED]", result)
+    return result
 
 
-def _redact_all_known_patterns(text: str) -> str:
-    result = _redact_secrets(text)
-    return _SECRET_PATTERNS[3].sub("[REDACTED]", result)
+def _validate_redaction_mode(mode: RedactionMode) -> None:
+    if mode not in {"off", "common", "strict"}:
+        raise ValueError("redaction_mode must be 'off', 'common', or 'strict'")
 
 
 def _line_key(line: str) -> str:
     return line.rstrip(" \t")
 
 
-def deduplicate(lines: Iterable[str]) -> list[str]:
+def _looks_like_technical_content(lines: list[str]) -> bool:
+    sample = "\n".join(lines[:80])
+    if not sample.strip():
+        return False
+    if "```" in sample:
+        return True
+    hints = sum(1 for hint in _CODE_HINTS if hint in sample)
+    syntax_lines = sum(1 for line in lines[:80] if re.search(r"^\s*(?:def|class|if|for|while|return|import|from)\b|[{};]$", line))
+    return hints >= 2 or syntax_lines >= 2
+
+
+def deduplicate(lines: Iterable[str], *, aggressive: bool = False) -> list[str]:
+    """Remove safe redundancy while preserving technical/code-like content.
+
+    Default mode removes only adjacent duplicate non-empty lines. Aggressive mode
+    removes repeated lines globally and should be used only for known prose/facts.
+    """
     result: list[str] = []
     seen: set[str] = set()
+    previous_key: str | None = None
     for raw in lines:
         if not isinstance(raw, str):
             raise TypeError("lines must contain only strings")
@@ -114,31 +145,60 @@ def deduplicate(lines: Iterable[str]) -> list[str]:
         if not line.strip():
             continue
         key = _line_key(line)
-        if key not in seen:
-            seen.add(key)
+        duplicate = key == previous_key if not aggressive else key in seen
+        if not duplicate:
             result.append(line)
+            seen.add(key)
+        previous_key = key
+    return result
+
+
+def _compact_lines(text: str, *, redact_mode: RedactionMode, aggressive: bool = False) -> str:
+    had_final_newline = text.endswith(("\n", "\r"))
+    lines = text.splitlines()
+    technical = _looks_like_technical_content(lines)
+    # Never use global duplicate removal on code, commands, JSON/YAML, logs, etc.
+    use_aggressive = aggressive and not technical
+    cleaned: list[str] = []
+    for line in lines:
+        if redact_mode != "off":
+            line = _redact_secrets(line, redact_mode)
+        cleaned.append(line)
+    result_lines = deduplicate(cleaned, aggressive=use_aggressive)
+    result = "\n".join(result_lines)
+    if had_final_newline and result:
+        result += "\n"
     return result
 
 
 class RealtimeCompactor:
     """Compact complete lines as chunks arrive, buffering only an incomplete line."""
 
-    def __init__(self, *, redact_secrets: bool = True, tokenizer: TokenizerLike | None = None) -> None:
-        self.redact_secrets = redact_secrets
+    def __init__(self, *, redact_secrets: bool = True, redaction_mode: RedactionMode | None = None, tokenizer: TokenizerLike | None = None, aggressive: bool = False) -> None:
+        if redaction_mode is None:
+            redaction_mode = "common" if redact_secrets else "off"
+        _validate_redaction_mode(redaction_mode)
+        self.redaction_mode = redaction_mode
         self.tokenizer = tokenizer
+        self.aggressive = aggressive
         self._buffer = ""
         self._seen: set[str] = set()
+        self._previous_key: str | None = None
+        self._technical = False
         self._original_parts: list[str] = []
         self._output_parts: list[str] = []
         self.finished = False
 
     def _process_line(self, raw_line: str, newline: str) -> str:
-        line = _redact_all_known_patterns(raw_line) if self.redact_secrets else raw_line
+        line = _redact_secrets(raw_line, self.redaction_mode)
         line = line.rstrip("\r\n")
         if not line.strip():
             return ""
+        self._technical = self._technical or _looks_like_technical_content([line])
         key = _line_key(line)
-        if key in self._seen:
+        duplicate = key == self._previous_key if not self.aggressive or self._technical else key in self._seen
+        self._previous_key = key
+        if duplicate:
             return ""
         self._seen.add(key)
         output = line + newline
@@ -208,17 +268,21 @@ class RealtimeCompactor:
         return self.tokenizer is not None
 
     @property
+    def token_count_source(self) -> str:
+        return "supplied-tokenizer" if self.tokenizer is not None else "approximate"
+
+    @property
     def reduction_percent(self) -> float:
         return reduction(self.original, self.compacted, tokenizer=self.tokenizer)
 
     def result(self) -> CompactionResult:
         if not self.finished:
             raise RuntimeError("Call finish() before requesting the final result")
-        return CompactionResult(self.original, self.compacted, self.in_tokens, self.out_tokens, self.reduction_percent, self.token_count_is_exact)
+        return CompactionResult(self.original, self.compacted, self.in_tokens, self.out_tokens, self.reduction_percent, self.token_count_is_exact, self.token_count_source)
 
 
-def compact_stream(chunks: Iterable[str], *, redact_secrets: bool = True, tokenizer: TokenizerLike | None = None) -> Iterator[str]:
-    compactor = RealtimeCompactor(redact_secrets=redact_secrets, tokenizer=tokenizer)
+def compact_stream(chunks: Iterable[str], *, redact_secrets: bool = True, redaction_mode: RedactionMode | None = None, tokenizer: TokenizerLike | None = None, aggressive: bool = False) -> Iterator[str]:
+    compactor = RealtimeCompactor(redact_secrets=redact_secrets, redaction_mode=redaction_mode, tokenizer=tokenizer, aggressive=aggressive)
     for chunk in chunks:
         emitted = compactor.feed(chunk)
         if emitted:
@@ -228,25 +292,24 @@ def compact_stream(chunks: Iterable[str], *, redact_secrets: bool = True, tokeni
         yield final
 
 
-def compact_text(text: str, *, redact_secrets: bool = True) -> str:
+def compact_text(text: str, *, redact_secrets: bool = True, redaction_mode: RedactionMode | None = None, aggressive: bool = False) -> str:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     if not text:
         return ""
-    had_final_newline = text.endswith(("\n", "\r"))
-    result = "".join(compact_stream([text], redact_secrets=redact_secrets))
-    if not had_final_newline:
-        result = result.rstrip("\r\n")
-    return result
+    if redaction_mode is None:
+        redaction_mode = "common" if redact_secrets else "off"
+    _validate_redaction_mode(redaction_mode)
+    return _compact_lines(text, redact_mode=redaction_mode, aggressive=aggressive)
 
 
-def compact_text_with_metrics(text: str, *, redact_secrets: bool = True, tokenizer: TokenizerLike | None = None) -> CompactionResult:
+def compact_text_with_metrics(text: str, *, redact_secrets: bool = True, redaction_mode: RedactionMode | None = None, tokenizer: TokenizerLike | None = None, aggressive: bool = False) -> CompactionResult:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    compacted = compact_text(text, redact_secrets=redact_secrets)
-    in_tokens, exact = _token_count_with(tokenizer, text)
-    out_tokens, _ = _token_count_with(tokenizer, compacted)
-    return CompactionResult(text, compacted, in_tokens, out_tokens, reduction(text, compacted, tokenizer=tokenizer), exact)
+    compacted = compact_text(text, redact_secrets=redact_secrets, redaction_mode=redaction_mode, aggressive=aggressive)
+    in_tokens, exact, source = _token_count_with(tokenizer, text)
+    out_tokens, _, _ = _token_count_with(tokenizer, compacted)
+    return CompactionResult(text, compacted, in_tokens, out_tokens, reduction(text, compacted, tokenizer=tokenizer), exact, source)
 
 
 def reduction(before: str, after: str, *, tokenizer: TokenizerLike | None = None) -> float:
@@ -277,7 +340,7 @@ def load_memory(path: str | Path) -> Memory:
 
 
 def merge_list(current: Iterable[str], incoming: Iterable[str]) -> list[str]:
-    return deduplicate([*current, *incoming])
+    return deduplicate([*current, *incoming], aggressive=True)
 
 
 def merge_memory(current: Memory, incoming: Memory) -> Memory:
@@ -305,7 +368,7 @@ def memory_to_text(memory: Memory) -> str:
         ("ISSUES", memory.issues), ("NEXT", memory.next_steps), ("PREFERENCES", memory.preferences),
         ("HISTORY", memory.history),
     ]:
-        values = deduplicate(values)
+        values = deduplicate(values, aggressive=True)
         if values:
             sections.append(title + ":\n" + "\n".join(f"- {value}" for value in values))
     return "\n\n".join(sections)
@@ -316,9 +379,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compact text for AI Token Saver.")
     parser.add_argument("text", nargs="?", help="Text to compact.")
     parser.add_argument("--keep-secrets", action="store_true", help="Disable default secret redaction.")
+    parser.add_argument("--redaction", choices=("off", "common", "strict"), help="Secret redaction mode.")
+    parser.add_argument("--aggressive", action="store_true", help="Use global duplicate removal for non-technical prose.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed metrics.")
     args = parser.parse_args()
-    result = compact_text_with_metrics(args.text or "", redact_secrets=not args.keep_secrets)
+    mode = args.redaction or ("off" if args.keep_secrets else "common")
+    result = compact_text_with_metrics(args.text or "", redaction_mode=mode, aggressive=args.aggressive)
     print(result.compacted, end="" if result.compacted.endswith("\n") else "\n")
     if args.verbose:
         print("\n--- Metrics ---")
@@ -326,6 +392,6 @@ if __name__ == "__main__":
         print(f"Output tokens: {result.out_tokens}")
         print(f"Saved tokens:  {result.in_tokens - result.out_tokens}")
         print(f"Reduction:     {result.reduction_percent:.1%}")
-        print(f"Token count:   {'exact' if result.token_count_is_exact else 'approximate'}")
+        print(f"Token count:   {result.token_count_source}")
     else:
-        print(f"Measured token reduction: {result.reduction_percent:.1%} ({'exact' if result.token_count_is_exact else 'approximate'})")
+        print(f"Measured token reduction: {result.reduction_percent:.1%} ({result.token_count_source})")

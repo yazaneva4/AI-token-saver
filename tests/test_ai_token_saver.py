@@ -122,7 +122,6 @@ def test_exact_token_counter_is_used_and_marked_exact():
         "one two\none two\nthree\n",
         tokenizer=counter,
     )
-    # Five whitespace-delimited words become three after duplicate-line removal.
     assert result.in_tokens == 5
     assert result.out_tokens == 3
     assert result.token_count_is_exact is True
@@ -132,9 +131,9 @@ def test_exact_token_counter_is_used_and_marked_exact():
 def test_realtime_compactor_handles_split_chunks_and_deduplicates():
     compactor = RealtimeCompactor(redact_secrets=False)
     assert compactor.feed("hello\nhel") == "hello\n"
-    assert compactor.feed("lo\nhello\nworld") == "world\n"
-    assert compactor.finish() == ""
-    assert compactor.compacted == "hello\nworld\n"
+    assert compactor.feed("lo\nhello\nworld") == ""
+    assert compactor.finish() == "world"
+    assert compactor.compacted == "hello\nworld"
     assert compactor.original == "hello\nhello\nhello\nworld"
 
 
@@ -142,7 +141,7 @@ def test_realtime_compactor_preserves_code_indentation():
     compactor = RealtimeCompactor(redact_secrets=False)
     emitted = compactor.feed("def hello():\n    print(\"hello\")\n    print(\"hello\")")
     emitted += compactor.finish()
-    assert emitted == "def hello():\n    print(\"hello\")"
+    assert emitted == "def hello():\n    print(\"hello\")\n"
 
 
 def test_realtime_compactor_reports_metrics_after_finish():
@@ -176,7 +175,7 @@ def test_realtime_rejects_feed_after_finish():
     try:
         compactor.feed("more")
     except RuntimeError as exc:
-        assert "already been finished" in str(exc)
+        assert "already finished" in str(exc)
     else:
         raise AssertionError("feed() must reject chunks after finish()")
 

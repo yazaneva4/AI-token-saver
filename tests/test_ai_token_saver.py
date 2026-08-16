@@ -122,10 +122,11 @@ def test_exact_token_counter_is_used_and_marked_exact():
         "one two\none two\nthree\n",
         tokenizer=counter,
     )
-    assert result.in_tokens == 6
+    # Five whitespace-delimited words become three after duplicate-line removal.
+    assert result.in_tokens == 5
     assert result.out_tokens == 3
     assert result.token_count_is_exact is True
-    assert result.reduction_percent == 0.5
+    assert result.reduction_percent == 0.4
 
 
 def test_realtime_compactor_handles_split_chunks_and_deduplicates():

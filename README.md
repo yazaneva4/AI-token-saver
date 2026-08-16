@@ -14,7 +14,7 @@ It provides:
 - ♻️ Duplicate removal without deleting meaningful phrases
 - 📦 Stable, structured JSON memory storage
 - 🔀 Memory merging and deduplication
-- 📏 Actual before/after reduction measurement
+- 📏 Actual before/after reduction measurement with in/out token counts
 - 🤖 Model/provider-agnostic skill instructions
 - 🔌 Designed to adapt to different AI assistants and coding agents
 - 🔐 Secret-looking values are redacted by default during text compaction
@@ -66,16 +66,24 @@ for that input.
 ## Python usage
 
 ```python
-from ai_token_saver import Memory, compact_text, memory_to_text, reduction
+from ai_token_saver import Memory, compact_text, compact_text_with_metrics, memory_to_text, reduction
 
 text = """We need to save the project state.
 We need to save the project state.
 OpenSpark is the current project.
 """
 
+# Basic usage - returns compacted text
 compacted = compact_text(text)
 print(compacted)
 print(f"Reduction: {reduction(text, compacted):.1%}")
+
+# Detailed metrics - returns in/out tokens and reduction
+result = compact_text_with_metrics(text)
+print(f"Input tokens:  {result.in_tokens}")
+print(f"Output tokens: {result.out_tokens}")
+print(f"Saved tokens:  {result.in_tokens - result.out_tokens}")
+print(f"Reduction:     {result.reduction_percent:.1%}")
 
 memory = Memory(
     project="OpenSpark",

@@ -15,6 +15,16 @@ from typing import Iterable, Mapping
 
 
 @dataclass
+class CompactionResult:
+    """Result of text compaction with before/after metrics."""
+    original: str
+    compacted: str
+    in_tokens: int
+    out_tokens: int
+    reduction_percent: float
+
+
+@dataclass
 class Memory:
     project: str = ""
     goal: str = ""
@@ -101,6 +111,27 @@ def compact_text(text: str, *, redact_secrets: bool = True) -> str:
     return "\n".join(deduplicate(source.splitlines()))
 
 
+def compact_text_with_metrics(text: str, *, redact_secrets: bool = True) -> CompactionResult:
+    """Compact text and return detailed metrics including in/out token counts.
+    
+    This function provides the same compaction as compact_text() but also
+    returns the original text, estimated input tokens, estimated output tokens,
+    and the actual reduction percentage achieved.
+    """
+    source = _redact_secrets(text) if redact_secrets else text
+    compacted = "\n".join(deduplicate(source.splitlines()))
+    in_tokens = estimate_tokens(text)
+    out_tokens = estimate_tokens(compacted)
+    reduction_pct = reduction(text, compacted)
+    return CompactionResult(
+        original=text,
+        compacted=compacted,
+        in_tokens=in_tokens,
+        out_tokens=out_tokens,
+        reduction_percent=reduction_pct,
+    )
+
+
 def reduction(before: str, after: str) -> float:
     """Return approximate token reduction as a fraction from 0 to 1."""
     old = estimate_tokens(before)
@@ -185,8 +216,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Disable the default secret redaction (not recommended).",
     )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Show detailed metrics including in/out token counts.",
+    )
     args = parser.parse_args()
     source = args.text or ""
-    compacted = compact_text(source, redact_secrets=not args.keep_secrets)
-    print(compacted)
-    print(f"\nApprox. token reduction: {reduction(source, compacted):.1%}")
+    
+    if args.verbose:
+        result = compact_text_with_metrics(source, redact_secrets=not args.keep_secrets)
+        print(result.compacted)
+        print(f"\n--- Metrics ---")
+        print(f"Input tokens:  {result.in_tokens}")
+        print(f"Output tokens: {result.out_tokens}")
+        print(f"Saved tokens:  {result.in_tokens - result.out_tokens}")
+        print(f"Reduction:     {result.reduction_percent:.1%}")
+    else:
+        compacted = compact_text(source, redact_secrets=not args.keep_secrets)
+        print(compacted)
+        print(f"\nApprox. token reduction: {reduction(source, compacted):.1%}")

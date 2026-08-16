@@ -2,34 +2,34 @@
 name: ai-token-saver
 description: >
   Token-efficient persistent context and memory skill for any AI assistant.
-  Compresses saved context toward an up-to-99% reduction when repetition or
-  filler allows, while preserving meaning, technical accuracy, and important
-  details. Supports real-time incremental compaction and optional exact token
-  counting when the host provides the target model's tokenizer.
+  Reduces safe redundancy while preserving meaning, technical accuracy, and
+  important details. Supports real-time incremental compaction and optional
+  model-specific token counting when the host provides a trusted tokenizer.
 ---
 
 # AI Token Saver
 
 ## Purpose
 
-Save important project context in compact form so any AI assistant can continue
+Save important project context in compact form so an AI assistant can continue
 work accurately while using less context.
 
-Target: **up to about 99% fewer context/memory tokens** when the input contains
-substantial repetition or filler.
+**Preserve meaning first. Reduce safe redundancy second. Measure the result third.**
 
-99% is a target, not a guarantee. Never remove information merely to hit the
-target if doing so would change meaning or break future work.
+A reduction of up to about 99% may be possible for highly repetitive or padded
+input, but it is never a guaranteed target. Never remove information merely to
+reach a percentage.
 
 ## Core Rules
 
 1. Save important project context accurately.
-2. Compress repeated or redundant information.
-3. Preserve meaning, technical accuracy, and useful relationships between facts.
+2. Remove only genuine redundancy, filler, or safely disposable formatting.
+3. Preserve meaning, technical accuracy, and relationships between facts.
 4. Preserve exact names, file paths, commands, model names, versions, APIs,
-   configuration values, and technical decisions when important.
+   configuration values, technical decisions, and error text when important.
 5. Never invent missing information.
-6. Deduplicate aggressively.
+6. Deduplicate conservatively; similar-looking lines are not automatically
+   duplicates.
 7. Prefer compact structured records over repeated prose.
 8. Replace clearly outdated values with current values while retaining useful
    history when needed.
@@ -41,60 +41,69 @@ target if doing so would change meaning or break future work.
 
 AI Token Saver supports two measurement modes:
 
-- **Exact mode:** when the host provides the tokenizer used by the target model,
-  pass that tokenizer or a token-counting function to the implementation. The
-  reported input/output counts and reduction then use that tokenizer.
+- **Model-specific mode:** the host may provide the tokenizer used by the target
+  model, or a trusted token-counting function. The implementation can then use
+  that counter for input/output measurements. This is only as exact as the
+  supplied tokenizer and its match to the target model.
 - **Fallback mode:** when no tokenizer is supplied, the implementation uses a
-  dependency-free character-based estimate. This is explicitly approximate and
-  must never be presented as an exact model-token count.
+  dependency-free character-based estimate. This is approximate and must never
+  be presented as an exact model-token count.
 
-Never claim a fixed percentage of savings from the fallback estimate. Always
-report the reduction actually measured for the specific input.
+Always report the reduction actually measured for the specific input. Do not
+promise a fixed savings percentage.
 
-## 99% Token Optimization
+## Safe Token Optimization
 
 When saving context:
 
 - Remove repeated information.
-- Remove unnecessary filler and whitespace.
-- Merge related facts.
-- Use concise wording.
+- Remove genuine filler.
+- Merge clearly equivalent facts.
+- Use concise wording where meaning is unchanged.
 - Keep one canonical version of each current fact.
-- Remove superseded duplicate entries.
+- Remove superseded duplicates when they no longer provide useful history.
 - Keep dependencies and relationships explicit.
 - Preserve exact technical identifiers.
 - Preserve important constraints.
 - Preserve unresolved bugs and next steps.
 - Do not use unexplained abbreviations that could reduce clarity.
-- Do not compress code, commands, paths, model names, or error strings when
+- Do not rewrite code, commands, paths, model names, or error strings when
   exact text matters.
 
-The 99% figure is a maximum target for cases where the source contains enough
-redundancy to support that level of reduction. It is not a promise of 99%
-reduction on every input.
+The implementation is primarily a conservative redundancy remover. It is not a
+semantic summarizer and must not pretend that every unique conversation can be
+compressed by 99% without information loss.
 
 ## Real-Time Compaction
 
-When the implementation is available, context may be processed incrementally
-as chunks arrive instead of waiting for the complete input.
+When the implementation is available, context may be processed incrementally as
+chunks arrive instead of waiting for the complete input.
 
-- Feed incoming chunks to the real-time compactor.
-- Keep incomplete final lines buffered until their content is complete.
-- Emit newly completed unique lines as soon as they can be safely processed.
-- Preserve the first occurrence's exact meaningful content.
-- Flush the final partial line when the stream finishes.
-- Do not claim that real-time compaction is character-level or token-level when
-  the implementation is using safe line-level buffering.
+- Feed incoming string chunks to the real-time compactor.
+- Incomplete final lines are buffered until their content is complete.
+- Newly completed unique lines can be emitted immediately.
+- The first occurrence's meaningful content is preserved.
+- The final partial line is flushed when the stream finishes.
+- The current implementation is line-oriented, not character-level or
+  token-level streaming.
+- Very large lines without a line ending may remain buffered until completion.
+- Provider-specific streaming adapters may still be required to connect this
+  implementation to an AI provider's streaming API.
 
-Real-time compaction does not automatically connect to a provider's streaming
-API. A provider-specific adapter may be required by the host application.
+## Token Counting in Real Time
+
+The real-time compactor can use the same optional tokenizer/token-counter for
+cumulative input/output measurements.
+
+Supplying a tokenizer does **not** prove that it matches the target model. The
+host application is responsible for supplying a trusted tokenizer appropriate
+to the model whose context limits or usage are being measured.
 
 ## Universal AI Compatibility
 
-This skill is designed to be model-agnostic.
-
-It can be adapted for AI assistants, coding agents, chat assistants, and other
-systems that support custom instructions, skills, memory, or context files.
+This skill is model-agnostic and can be adapted for AI assistants, coding agents,
+chat assistants, and systems that support custom instructions, skills, memory,
+or context files.
 
 Do not assume a specific AI provider, model, API, SDK, or application.
 
@@ -105,10 +114,13 @@ AI Token Saver MUST NOT block, disable, reset, or override other skills.
 Other skills may control response style, coding behavior, browser behavior,
 reasoning preferences, or other functions independently.
 
-If another skill is active, AI Token Saver should continue saving and compressing
-context while respecting that skill's behavior.
+If another skill is active, AI Token Saver should continue its context-saving
+behavior while respecting that skill's behavior.
 
 ## Commands
+
+These commands are conventions for hosts that support custom skill commands.
+They are not guaranteed to exist in every AI application.
 
 ### /save
 
@@ -116,8 +128,9 @@ Save important persistent information from the current conversation.
 
 ### /save-all
 
-Save all important persistent context available from the current conversation,
-then deduplicate and compress it.
+Save all **important persistent** context available from the current
+conversation, then deduplicate and compress it. Do not interpret “all” as
+permission to save secrets or temporary chatter.
 
 ### /memory
 
@@ -131,11 +144,11 @@ If the target is ambiguous, ask before deleting.
 
 ### /stop-saving
 
-Disable AI Token Saver until re-enabled.
+Disable AI Token Saver until re-enabled, if the host supports skill state.
 
 ### /start-saving
 
-Enable AI Token Saver.
+Enable AI Token Saver until disabled, if the host supports skill state.
 
 ## Memory Structure
 
@@ -214,11 +227,11 @@ You may save non-secret status such as:
 
 ## Response Behavior
 
-After `/save`:
+After `/save`, if the host supports the command:
 
 "Saved. Context compressed."
 
-After `/save-all`:
+After `/save-all`, if the host supports the command:
 
 "Saved. Context deduplicated and compressed."
 

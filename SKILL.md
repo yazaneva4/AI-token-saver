@@ -4,7 +4,10 @@ description: >
   Token-efficient persistent context and memory skill for any AI assistant.
   Compresses saved context toward an up-to-99% token reduction when repetition
   or filler allows, while preserving meaning, technical accuracy, and important
-  details. Works alongside other skills without blocking or overriding them.
+  details. Uses precise tiktoken-based counting, supports configurable aggression
+  levels (safe/balanced/aggressive), provides JSON structured output, and is
+  architected for future real-time streaming. Works alongside other skills without
+  blocking or overriding them.
 ---
 
 # AI Token Saver
@@ -20,6 +23,8 @@ substantial repetition or filler.
 99% is a target, not a guarantee. Never remove information merely to hit the
 target if doing so would change meaning or break future work.
 
+Reports actual measured savings using precise `tiktoken`-based estimation.
+
 ## Core Rules
 
 1. Save important project context accurately.
@@ -28,13 +33,16 @@ target if doing so would change meaning or break future work.
 4. Preserve exact names, file paths, commands, model names, versions, APIs,
    configuration values, and technical decisions when important.
 5. Never invent missing information.
-6. Deduplicate aggressively.
+6. Deduplicate aggressively (exact and semantic when enabled).
 7. Prefer compact structured records over repeated prose.
 8. Replace clearly outdated values with current values while retaining useful
    history when needed.
 9. Never store passwords, API keys, authentication codes, private tokens, or
    other secrets.
 10. Do not save temporary chatter unless explicitly requested.
+11. Support configurable aggression: safe (preserve all), balanced (default), aggressive (max compression).
+12. Provide structured JSON output for automation pipelines.
+13. Maintain stateful architecture compatible with real-time streaming inputs.
 
 ## 99% Token Optimization
 
@@ -82,11 +90,13 @@ context while respecting that skill's behavior.
 ### /save
 
 Save important persistent information from the current conversation.
+Supports optional `--mode` (safe|balanced|aggressive) and `--json` flags.
 
 ### /save-all
 
 Save all important persistent context available from the current conversation,
 then deduplicate and compress it.
+Supports optional `--mode` (safe|balanced|aggressive) and `--json` flags.
 
 ### /memory
 

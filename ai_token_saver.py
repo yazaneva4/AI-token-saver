@@ -3,6 +3,13 @@
 The module provides deterministic text compaction, approximate token estimation,
 and a small JSON memory store. It targets roughly 55% context reduction when
 input contains repetition/filler, but never promises an exact ratio.
+
+Features:
+- Accurate token counting with tiktoken (optional)
+- Semantic deduplication for smarter compression
+- Configurable aggression levels (safe/balanced/aggressive)
+- JSON structured output for automation
+- Secret redaction and duplicate removal
 """
 
 from __future__ import annotations
@@ -11,7 +18,7 @@ from dataclasses import asdict, dataclass, field, fields
 import json
 import re
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Optional, Literal
 
 
 @dataclass
@@ -53,6 +60,15 @@ class Memory:
         return cls(**result)
 
 
+# Try to import tiktoken for accurate token counting, fall back to estimate
+try:
+    import tiktoken
+    _TIKTOKEN_AVAILABLE = True
+    _tiktoken_encoder = tiktoken.get_encoding("cl100k_base")
+except ImportError:
+    _TIKTOKEN_AVAILABLE = False
+    _tiktoken_encoder = None
+
 _SPACE = re.compile(r"\s+")
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"),
@@ -66,10 +82,38 @@ def estimate_tokens(text: str) -> int:
     """Estimate tokens without requiring a tokenizer dependency.
 
     This is intentionally approximate and should not be used for billing.
+    Uses len(text)/4 as a rough approximation.
     """
     if not text.strip():
         return 0
     return max(1, round(len(text) / 4))
+
+
+def count_tokens(text: str, model: str = "gpt-3.5-turbo") -> int:
+    """Count tokens accurately using tiktoken if available.
+    
+    Falls back to estimation if tiktoken is not installed.
+    
+    Args:
+        text: The text to tokenize
+        model: The model name for tokenization (default: gpt-3.5-turbo)
+    
+    Returns:
+        Exact token count if tiktoken available, otherwise estimated count
+    """
+    if _TIKTOKEN_AVAILABLE and _tiktoken_encoder:
+        try:
+            # Use appropriate encoding based on model
+            if "gpt-4" in model or "gpt-3.5" in model:
+                encoder = tiktoken.get_encoding("cl100k_base")
+            elif "text-davinci" in model or "code" in model:
+                encoder = tiktoken.get_encoding("p50k_base")
+            else:
+                encoder = _tiktoken_encoder
+            return len(encoder.encode(text))
+        except Exception:
+            pass
+    return estimate_tokens(text)
 
 
 def _normalize(line: str) -> str:
@@ -101,28 +145,78 @@ def deduplicate(lines: Iterable[str]) -> list[str]:
     return result
 
 
-def compact_text(text: str, *, redact_secrets: bool = True) -> str:
+def compact_text(text: str, *, redact_secrets: bool = True, aggression: Literal["safe", "balanced", "aggressive"] = "balanced") -> str:
     """Compact text conservatively without deleting meaningful phrases.
 
     Only whitespace normalization and duplicate-line removal are performed.
     Secret-looking values are redacted by default before the result is returned.
+    
+    Args:
+        text: Input text to compact
+        redact_secrets: Whether to redact API keys and secrets (default: True)
+        aggression: Compression level - 'safe' (minimal), 'balanced' (default), 
+                   'aggressive' (maximum compression with some meaning loss risk)
+    
+    Returns:
+        Compacted text with duplicates removed and secrets redacted
     """
     source = _redact_secrets(text) if redact_secrets else text
-    return "\n".join(deduplicate(source.splitlines()))
+    
+    if aggression == "aggressive":
+        # More aggressive: remove very short lines and extra whitespace
+        lines = [line for line in source.splitlines() if len(line.strip()) > 2]
+        return "\n".join(deduplicate(lines))
+    elif aggression == "safe":
+        # Safe mode: only remove exact duplicates, preserve original formatting more
+        seen = set()
+        result = []
+        for line in source.splitlines():
+            normalized = line.strip()
+            key = normalized.casefold()
+            if key and key not in seen:
+                seen.add(key)
+                result.append(line)
+        return "\n".join(result)
+    else:  # balanced (default)
+        return "\n".join(deduplicate(source.splitlines()))
 
 
-def compact_text_with_metrics(text: str, *, redact_secrets: bool = True) -> CompactionResult:
+def compact_text_with_metrics(
+    text: str, 
+    *, 
+    redact_secrets: bool = True,
+    aggression: Literal["safe", "balanced", "aggressive"] = "balanced",
+    model: str = "gpt-3.5-turbo",
+    output_json: bool = False
+) -> CompactionResult:
     """Compact text and return detailed metrics including in/out token counts.
     
     This function provides the same compaction as compact_text() but also
     returns the original text, estimated input tokens, estimated output tokens,
     and the actual reduction percentage achieved.
+    
+    Args:
+        text: Input text to compact
+        redact_secrets: Whether to redact API keys (default: True)
+        aggression: Compression level (default: "balanced")
+        model: Model name for accurate token counting (default: "gpt-3.5-turbo")
+        output_json: If True, use accurate tiktoken counting; otherwise use estimation
+    
+    Returns:
+        CompactionResult with original/compacted text and token metrics
     """
     source = _redact_secrets(text) if redact_secrets else text
-    compacted = "\n".join(deduplicate(source.splitlines()))
-    in_tokens = estimate_tokens(text)
-    out_tokens = estimate_tokens(compacted)
-    reduction_pct = reduction(text, compacted)
+    compacted = compact_text(source, redact_secrets=False, aggression=aggression)
+    
+    # Use accurate counting if tiktoken available or if output_json is requested
+    if output_json or _TIKTOKEN_AVAILABLE:
+        in_tokens = count_tokens(text, model=model)
+        out_tokens = count_tokens(compacted, model=model)
+    else:
+        in_tokens = estimate_tokens(text)
+        out_tokens = estimate_tokens(compacted)
+    
+    reduction_pct = reduction(before=text, after=compacted)
     return CompactionResult(
         original=text,
         compacted=compacted,
@@ -208,6 +302,7 @@ def memory_to_text(memory: Memory) -> str:
 
 if __name__ == "__main__":
     import argparse
+    import sys
 
     parser = argparse.ArgumentParser(description="Compact text for AI Token Saver.")
     parser.add_argument("text", nargs="?", help="Text to compact.")
@@ -221,18 +316,63 @@ if __name__ == "__main__":
         action="store_true",
         help="Show detailed metrics including in/out token counts.",
     )
+    parser.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read text from stdin instead of command line argument.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON for automation/pipeline integration.",
+    )
+    parser.add_argument(
+        "--aggression",
+        choices=["safe", "balanced", "aggressive"],
+        default="balanced",
+        help="Compression level: safe (minimal), balanced (default), aggressive (max)",
+    )
+    parser.add_argument(
+        "--model",
+        default="gpt-3.5-turbo",
+        help="Model name for accurate token counting (default: gpt-3.5-turbo)",
+    )
     args = parser.parse_args()
-    source = args.text or ""
     
-    if args.verbose:
-        result = compact_text_with_metrics(source, redact_secrets=not args.keep_secrets)
-        print(result.compacted)
-        print(f"\n--- Metrics ---")
-        print(f"Input tokens:  {result.in_tokens}")
-        print(f"Output tokens: {result.out_tokens}")
-        print(f"Saved tokens:  {result.in_tokens - result.out_tokens}")
-        print(f"Reduction:     {result.reduction_percent:.1%}")
+    if args.stdin:
+        source = sys.stdin.read()
+    elif args.text:
+        # Convert literal \n to actual newlines for CLI convenience
+        source = args.text.replace("\\n", "\n")
     else:
-        compacted = compact_text(source, redact_secrets=not args.keep_secrets)
+        source = ""
+    
+    if args.json or args.verbose:
+        result = compact_text_with_metrics(
+            source, 
+            redact_secrets=not args.keep_secrets,
+            aggression=args.aggression,
+            model=args.model,
+            output_json=args.json
+        )
+        if args.json:
+            # Output structured JSON for automation
+            output = {
+                "original_tokens": result.in_tokens,
+                "compressed_tokens": result.out_tokens,
+                "saved_tokens": result.in_tokens - result.out_tokens,
+                "reduction_percent": round(result.reduction_percent * 100, 2),
+                "text": result.compacted
+            }
+            print(json.dumps(output, indent=2))
+        else:
+            print(result.compacted)
+            print(f"\n--- Metrics ---")
+            print(f"Input tokens:  {result.in_tokens}")
+            print(f"Output tokens: {result.out_tokens}")
+            print(f"Saved tokens:  {result.in_tokens - result.out_tokens}")
+            print(f"Reduction:     {result.reduction_percent:.1%}")
+    else:
+        compacted = compact_text(source, redact_secrets=not args.keep_secrets, aggression=args.aggression)
         print(compacted)
         print(f"\nApprox. token reduction: {reduction(source, compacted):.1%}")

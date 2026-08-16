@@ -1,17 +1,18 @@
 ---
-name: sparksave
+name: ai-token-saver
 description: >
-  Token-efficient persistent project-memory skill. Compresses saved context toward
-  a 55% token reduction while preserving meaning, technical accuracy, and important
-  details. Works alongside other skills, including Caveman, without blocking them.
+  Token-efficient persistent context and memory skill for any AI assistant.
+  Compresses saved context toward a 55% token reduction while preserving meaning,
+  technical accuracy, and important details. Works alongside other skills without
+  blocking or overriding them.
 ---
 
-# SparkSave
+# AI Token Saver
 
 ## Purpose
 
-Save important project context in compact form so future conversations need less
-context while retaining the information needed to continue work accurately.
+Save important project context in compact form so any AI assistant can continue
+work accurately while using less context.
 
 Target: approximately **55% fewer context/memory tokens** than an uncompressed
 memory dump.
@@ -33,7 +34,7 @@ target if doing so would change meaning or break future work.
    history when needed.
 9. Never store passwords, API keys, authentication codes, private tokens, or
    other secrets.
-10. Do not save temporary chatter unless the user explicitly asks.
+10. Do not save temporary chatter unless explicitly requested.
 
 ## 55% Token Optimization
 
@@ -66,24 +67,24 @@ compact structure
         ↓
 ~55% fewer context tokens
 
+## Universal AI Compatibility
+
+This skill is designed to be model-agnostic.
+
+It can be adapted for AI assistants, coding agents, chat assistants, and other
+systems that support custom instructions, skills, memory, or context files.
+
+Do not assume a specific AI provider, model, API, SDK, or application.
+
 ## Skill Compatibility
 
-SparkSave MUST NOT block, disable, reset, or override other skills.
+AI Token Saver MUST NOT block, disable, reset, or override other skills.
 
-### Caveman
+Other skills may control response style, coding behavior, browser behavior,
+reasoning preferences, or other functions independently.
 
-Caveman and SparkSave work together.
-
-- Caveman controls response compression/style.
-- SparkSave controls memory/context compression.
-- Both may be active simultaneously.
-- SparkSave must never turn Caveman off.
-- Caveman must never prevent SparkSave from saving context.
-- `/caveman` affects Caveman only.
-- `stop caveman` / `normal mode` affects Caveman only.
-- `/save`, `/save-all`, `/memory`, `/forget`, and `/stop-saving` affect SparkSave only.
-
-When both are active, confirmations should also be concise.
+If another skill is active, AI Token Saver should continue saving and compressing
+context while respecting that skill's behavior.
 
 ## Commands
 
@@ -104,15 +105,15 @@ Show relevant saved context in compact form.
 
 Forget the specific information requested by the user.
 
-If target is ambiguous, ask before deleting.
+If the target is ambiguous, ask before deleting.
 
 ### /stop-saving
 
-Disable SparkSave until re-enabled.
+Disable AI Token Saver until re-enabled.
 
 ### /start-saving
 
-Enable SparkSave.
+Enable AI Token Saver.
 
 ## Memory Structure
 
@@ -148,22 +149,12 @@ Only include sections that contain useful information.
 When new information changes an old value:
 
 CURRENT:
-- Store new value as canonical.
+- Store the new value as canonical.
 
 HISTORY:
-- Keep old value only if it helps explain project evolution.
+- Keep the old value only if it helps explain project evolution.
 
 Never present outdated and current values as equally current.
-
-Example:
-
-Previous model: X.
-Current model: Y.
-
-Store:
-
-MODEL: Y
-HISTORY: X (replaced)
 
 ## Context Selection
 
@@ -197,7 +188,7 @@ Never save:
 - Private credentials
 
 You may save non-secret status such as:
-"Gemini API key configured."
+"API key configured."
 
 ## Response Behavior
 

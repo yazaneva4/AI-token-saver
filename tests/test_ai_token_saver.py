@@ -139,3 +139,42 @@ def test_compact_stream_is_incremental_and_matches_compaction():
     output = "".join(compact_stream(chunks, redact_secrets=False))
     assert output == "one\ntwo\nthree\n"
     assert output.rstrip("\n") == compact_text("one\ntwo\ntwo\nthree", redact_secrets=False)
+
+
+def test_realtime_handles_split_crlf_without_extra_blank_output():
+    output = "".join(compact_stream(["one\r", "\ntwo\r\n", "three"], redact_secrets=False))
+    assert output == "one\ntwo\nthree"
+
+
+def test_realtime_rejects_feed_after_finish():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    compactor.feed("done")
+    assert compactor.finish() == "done"
+    assert compactor.finish() == ""
+    try:
+        compactor.feed("more")
+    except RuntimeError as exc:
+        assert "already been finished" in str(exc)
+    else:
+        raise AssertionError("feed() must reject chunks after finish()")
+
+
+def test_realtime_result_requires_finish():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    compactor.feed("hello\n")
+    try:
+        compactor.result()
+    except RuntimeError as exc:
+        assert "Call finish()" in str(exc)
+    else:
+        raise AssertionError("result() must require finish()")
+    compactor.finish()
+    assert compactor.result().compacted == "hello\n"
+
+
+def test_realtime_secret_redaction_across_chunks():
+    output = list(compact_stream(["api_key=SEC", "RET123\n", "Bearer ", "abc123\n"]))
+    combined = "".join(output)
+    assert "SECRET123" not in combined
+    assert "abc123" not in combined
+    assert "[REDACTED]" in combined

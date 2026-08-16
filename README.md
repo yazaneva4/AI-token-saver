@@ -4,20 +4,20 @@ A compact, model-agnostic token and context-saving tool designed to work with **
 
 ## What it does
 
-AI Token Saver performs **real, measured compaction**. It removes duplicate lines and unnecessary whitespace while preserving meaningful content, then reports the approximate reduction it actually achieved.
+AI Token Saver performs **real, measured compaction**. It removes duplicate lines and unnecessary whitespace while preserving meaningful content, then reports the reduction it actually achieved.
 
-It now also supports **real-time incremental compaction**: chunks can be fed as they arrive, and newly completed unique lines are emitted immediately instead of waiting for the complete input.
+It also supports **real-time incremental compaction**: chunks can be fed as they arrive, and newly completed unique lines are emitted immediately instead of waiting for the complete input.
 
 For highly repetitive input, the implementation can reach **up to about 99% reduction**. **99% is not a guaranteed result for every input**—if the input contains little redundancy, the real saving will be much smaller. The tool never deletes information just to make the percentage look better.
 
 It provides:
 
 - 🧠 Compact project-memory structures
-- ♻️ Duplicate removal without deleting meaningful phrases
+- ♻️ Conservative duplicate removal that avoids treating differently indented code as identical
 - ⚡ Real-time incremental/streaming compaction
 - 📦 Stable, structured JSON memory storage
 - 🔀 Memory merging and deduplication
-- 📏 Actual before/after reduction measurement with in/out token counts
+- 📏 Before/after token measurement with either a supplied model tokenizer or an explicit approximate fallback
 - 🤖 Model/provider-agnostic skill instructions
 - 🔌 Designed to adapt to different AI assistants and coding agents
 - 🔐 Secret-looking values are redacted by default during text compaction
@@ -62,6 +62,37 @@ for compacted_chunk in compact_stream(incoming_chunks):
     send_to_ai(compacted_chunk)
 ```
 
+## Token counting
+
+Without a tokenizer, AI Token Saver uses a dependency-free character-based estimate.
+That estimate is explicitly **approximate** and should not be used for exact billing
+or model-context-limit accounting.
+
+For model-specific measurements, pass a trusted tokenizer or token-counting function:
+
+```python
+from ai_token_saver import compact_text_with_metrics
+
+
+def count_tokens(text: str) -> int:
+    # Replace this with the tokenizer for your target model.
+    return len(text.split())
+
+result = compact_text_with_metrics(
+    "same line\nsame line\nunique line\n",
+    tokenizer=count_tokens,
+)
+
+print(result.in_tokens)
+print(result.out_tokens)
+print(result.reduction_percent)
+print(result.token_count_is_exact)
+```
+
+`token_count_is_exact=True` means the implementation used the supplied counter. It
+does **not** independently verify that the supplied counter matches the target model;
+the host application is responsible for that.
+
 ## Available for AI assistants
 
 AI Token Saver is **not locked to Claude, OpenAI, Gemini, or any other provider**.
@@ -80,6 +111,9 @@ AI-token-saver/
 ├── SKILL.md
 ├── ai_token_saver.py
 ├── README.md
+├── .github/
+│   └── workflows/
+│       └── tests.yml
 └── tests/
     └── test_ai_token_saver.py
 ```
@@ -91,8 +125,8 @@ Provider-agnostic skill instructions for saving and compressing AI context.
 ### `ai_token_saver.py`
 
 The Python implementation for text compaction, real-time incremental compaction,
-approximate token estimation, structured memory, persistence, merging, rendering,
-and default secret redaction.
+model-specific or approximate token measurement, structured memory, persistence,
+merging, rendering, and default secret redaction.
 
 ## Quick start
 
@@ -104,8 +138,8 @@ cd AI-token-saver
 python ai_token_saver.py "We need to save the project state.\nThe project state is important.\nThe project state is important."
 ```
 
-The command prints the compacted text and the **measured approximate reduction**
-for that input.
+The command prints the compacted text and the measured reduction. Without a supplied
+model tokenizer, the CLI labels its token measurement as approximate.
 
 ## Python usage
 
@@ -128,6 +162,7 @@ print(f"Input tokens:  {result.in_tokens}")
 print(f"Output tokens: {result.out_tokens}")
 print(f"Saved tokens:  {result.in_tokens - result.out_tokens}")
 print(f"Reduction:     {result.reduction_percent:.1%}")
+print(f"Token count:   {'exact' if result.token_count_is_exact else 'approximate'}")
 
 memory = Memory(
     project="OpenSpark",
@@ -145,9 +180,13 @@ print(memory_to_text(memory))
 python -m pytest
 ```
 
+GitHub Actions also runs the test suite on pushes and pull requests across Python
+3.10 through 3.13.
+
 The test suite covers duplicate removal, meaning preservation, code indentation,
-reduction bounds, memory merging, JSON round-tripping, malformed-memory handling,
-secret redaction, and real-time chunked compaction.
+newline preservation, exact/approximate token measurement, reduction bounds, memory
+merging, JSON round-tripping, malformed-memory handling, secret redaction, real-time
+chunked compaction, CRLF chunks, and input validation.
 
 ## Token-saving philosophy
 
@@ -171,5 +210,6 @@ guaranty of secret detection; do not rely on it as a credential manager.
 
 ## Status
 
-Early / experimental implementation. Token estimation is intentionally
-approximate and is not suitable for billing or exact model-token accounting.
+Early / experimental implementation. Token counting is approximate unless a trusted
+model-specific tokenizer or token-counting function is supplied. Exact accounting
+still depends on the supplied tokenizer matching the target model.

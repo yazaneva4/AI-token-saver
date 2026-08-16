@@ -34,21 +34,21 @@ It can be adapted for:
 Different AI platforms may have different skill formats and capabilities, so the
 installation method can vary. The core memory-saving rules remain provider-agnostic.
 
-## Recommended
+## Recommended setup
 
-**Recommended:** use AI Token Saver together with a response-compression skill
-such as Caveman when your AI platform supports both.
+**Recommended for the best experience:** use **AI Token Saver + Caveman** together
+when your AI platform supports both skills.
 
 - **AI Token Saver** 💾 — reduces saved context and memory overhead.
-- **Caveman** 🪨 — compresses assistant response style.
+- **Caveman** 🪨 — compresses assistant response style and helps reduce output tokens.
 
-They have different jobs and can work together.
+They have different jobs and can work together without either skill disabling the other.
 
 ### Caveman disclaimer
 
 **Caveman is NOT made by me and is NOT part of AI Token Saver. Caveman was made
-by JuliusBrussee.** This project only documents compatibility with Caveman as an
-optional complementary skill.
+by JuliusBrussee.** This project only recommends and documents compatibility with
+Caveman as an optional complementary skill. All Caveman credit belongs to its creator.
 
 ## Files
 

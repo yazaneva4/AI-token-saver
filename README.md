@@ -1,10 +1,10 @@
-# Claude Token Saver
+# AI Token Saver
 
-A compact, dependency-free **SparkSave** implementation for reducing repeated context and memory overhead while preserving important project information.
+A compact, model-agnostic token and context-saving tool designed to work with **any AI assistant or coding agent** that supports custom instructions, skills, memory, or context files.
 
 ## What it does
 
-SparkSave is designed around a target of **about 55% fewer context/memory tokens** when the input contains repetition or filler. The 55% figure is a target, not a guarantee.
+AI Token Saver targets **about 55% fewer context/memory tokens** when the input contains repetition or filler. The 55% figure is a target, not a guarantee.
 
 It provides:
 
@@ -13,36 +13,62 @@ It provides:
 - 📦 Stable, structured JSON memory storage
 - 🔀 Memory merging and deduplication
 - 📏 Approximate before/after token estimation
-- 🪨 Compatibility with the Caveman response-compression skill
+- 🤖 Model/provider-agnostic skill instructions
+- 🔌 Designed to adapt to different AI assistants and coding agents
+- 🪨 Compatible with the Caveman skill without overriding it
 - 🔐 No storage of passwords, API keys, access tokens, or authentication codes
+
+## Available for AI assistants
+
+AI Token Saver is **not locked to Claude, OpenAI, Gemini, or any other provider**.
+
+It can be adapted for:
+
+- Chat assistants
+- Coding agents
+- AI IDE assistants
+- Agent frameworks
+- Custom AI applications
+- Any AI system that supports custom skills, instructions, memory, or context files
+
+Different AI platforms may have different skill formats and capabilities, so the
+installation method can vary. The core memory-saving rules remain provider-agnostic.
+
+## Recommended
+
+**Recommended:** use AI Token Saver together with a response-compression skill
+such as Caveman when your AI platform supports both.
+
+- **AI Token Saver** 💾 — reduces saved context and memory overhead.
+- **Caveman** 🪨 — compresses assistant response style.
+
+They have different jobs and can work together.
+
+### Caveman disclaimer
+
+**Caveman is NOT made by me and is NOT part of AI Token Saver. Caveman was made
+by JuliusBrussee.** This project only documents compatibility with Caveman as an
+optional complementary skill.
 
 ## Files
 
 ```text
-Claude-token-saver/
+AI-token-saver/
 ├── SKILL.md
 ├── sparksave.py
+├── README.md
 └── tests/
     └── test_sparksave.py
 ```
 
 ### `SKILL.md`
 
-The skill instructions for using SparkSave as a memory/context-saving skill. It
-also defines how SparkSave works alongside Caveman without disabling or overriding it.
+Provider-agnostic skill instructions for saving and compressing AI context.
 
 ### `sparksave.py`
 
-The actual Python implementation. It includes:
-
-- `compact_text()` — compact repeated/filler-heavy text
-- `deduplicate()` — remove duplicate entries while preserving order
-- `estimate_tokens()` — approximate token count
-- `reduction()` — calculate approximate token reduction
-- `Memory` — structured project-memory model
-- `save_memory()` / `load_memory()` — JSON persistence
-- `merge_memory()` — merge and deduplicate memory
-- `memory_to_text()` — render compact structured memory
+The Python implementation for text compaction, token estimation, structured
+memory, persistence, merging, and rendering.
 
 ## Quick start
 
@@ -51,15 +77,15 @@ Clone the repository and run:
 ```bash
 git clone https://github.com/yazaneva4/Claude-token-saver.git
 cd Claude-token-saver
-python sparksave.py "Now we need to save the project state.\nThe project state is important.\nThe project state is important."
+python sparksave.py "We need to save the project state.\nThe project state is important.\nThe project state is important."
 ```
 
-The command prints the compacted text and an approximate reduction percentage.
+The command prints compacted text and an approximate reduction percentage.
 
 ## Python usage
 
 ```python
-from sparksave import Memory, compact_text, memory_to_text, merge_memory
+from sparksave import Memory, compact_text, memory_to_text
 
 text = """We need to save the project state.
 We need to save the project state.
@@ -80,18 +106,14 @@ print(memory_to_text(memory))
 
 ## Tests
 
-The repository includes tests for compaction, token-reduction calculation,
-memory merging, and compact rendering.
-
-With pytest installed:
-
 ```bash
 python -m pytest
 ```
 
 ## Token-saving philosophy
 
-SparkSave does **not** blindly delete context to hit a percentage. It prioritizes:
+AI Token Saver does **not** blindly delete context to hit a percentage. It
+prioritizes:
 
 1. Removing repeated information.
 2. Removing conversational filler.
@@ -102,27 +124,12 @@ SparkSave does **not** blindly delete context to hit a percentage. It prioritize
 
 The goal is **less context, not less meaning**.
 
-## Caveman + SparkSave
-
-These skills have different jobs:
-
-- **Caveman** 🪨 — compresses the assistant's response style.
-- **SparkSave** 💾 — compresses saved project context and memory.
-
-They can run together. SparkSave must not disable or override Caveman, and
-Caveman must not prevent SparkSave from saving context.
-
 ## Safety
 
-Do not put secrets into SparkSave memory. Never store passwords, API keys,
+Do not put secrets into AI Token Saver memory. Never store passwords, API keys,
 access tokens, authentication codes, or private credentials.
 
 ## Status
 
-Early project / experimental implementation. Token estimation is intentionally
+Early / experimental implementation. Token estimation is intentionally
 approximate and is not suitable for billing or exact model-token accounting.
-
-## License
-
-Add a license before distributing the project publicly if you want to define
-reuse and contribution terms.

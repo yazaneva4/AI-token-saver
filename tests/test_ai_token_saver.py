@@ -13,6 +13,16 @@ The current router is OpenSpark.
     assert estimate_tokens(result) < estimate_tokens(source)
 
 
+def test_compaction_preserves_code_indentation():
+    source = """def hello():
+    print(\"hello\")
+    print(\"hello\")
+"""
+    result = compact_text(source, redact_secrets=False)
+    assert result == "def hello():\n    print(\"hello\")"
+    assert result.startswith("def hello():\n    ")
+
+
 def test_reduction_is_bounded():
     source = "same line\nsame line\n"
     result = compact_text(source)
@@ -81,6 +91,5 @@ def test_compact_text_with_metrics_returns_all_fields():
 def test_compact_text_with_metrics_shows_real_savings():
     repetitive = "duplicate\n" * 100 + "unique\n"
     result = compact_text_with_metrics(repetitive)
-    # Should have high reduction due to many duplicates
-    assert result.reduction_percent > 0.9  # More than 90% reduction
+    assert result.reduction_percent > 0.9
     assert result.in_tokens > result.out_tokens

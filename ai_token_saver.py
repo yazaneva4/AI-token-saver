@@ -1,8 +1,9 @@
 """AI Token Saver: compact, dependency-free project context storage.
 
 The module provides deterministic text compaction, approximate token estimation,
-and a small JSON memory store. Compaction reports the reduction actually achieved;
-there is no guaranteed percentage because savings depend on the input.
+real-time incremental compaction, and a small JSON memory store. Compaction
+reports the reduction actually achieved; there is no guaranteed percentage
+because savings depend on the input.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from dataclasses import asdict, dataclass, field, fields
 import json
 import re
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable, Iterator, Mapping
 
 
 @dataclass
@@ -91,9 +92,6 @@ def deduplicate(lines: Iterable[str]) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
     for raw in lines:
-        # Preserve indentation and internal spacing in the emitted line. Only
-        # trailing whitespace is removed; whitespace is normalized only for
-        # duplicate detection so code/commands are not silently rewritten.
         line = raw.rstrip()
         if not line.strip():
             continue
@@ -105,15 +103,125 @@ def deduplicate(lines: Iterable[str]) -> list[str]:
     return result
 
 
-def compact_text(text: str, *, redact_secrets: bool = True) -> str:
-    """Compact text conservatively without rewriting meaningful line content.
+class RealtimeCompactor:
+    """Incrementally compact text as chunks arrive.
 
-    Duplicate detection is whitespace-insensitive, but the first occurrence is
-    emitted exactly (apart from trailing whitespace). Secret-looking values are
-    redacted by default before compaction.
+    Chunks may split anywhere, including in the middle of a line. The compactor
+    buffers only the incomplete final line, emits completed unique lines as soon
+    as they arrive, and keeps cumulative metrics. This makes it suitable for
+    streamed model output, logs, sockets, pipes, or UI input without waiting for
+    the complete source text.
     """
-    source = _redact_secrets(text) if redact_secrets else text
-    return "\n".join(deduplicate(source.splitlines()))
+
+    def __init__(self, *, redact_secrets: bool = True) -> None:
+        self.redact_secrets = redact_secrets
+        self._buffer = ""
+        self._seen: set[str] = set()
+        self._original_parts: list[str] = []
+        self._output_parts: list[str] = []
+        self.finished = False
+
+    def _process_line(self, raw_line: str, has_newline: bool) -> str:
+        line = _redact_secrets(raw_line) if self.redact_secrets else raw_line
+        line = line.rstrip("\r\n ")
+        if not line.strip():
+            return ""
+        key = _comparison_key(line)
+        if key in self._seen:
+            return ""
+        self._seen.add(key)
+        output = line + ("\n" if has_newline else "")
+        self._output_parts.append(output)
+        return output
+
+    def feed(self, chunk: str) -> str:
+        """Feed one chunk and return newly compacted output immediately."""
+        if self.finished:
+            raise RuntimeError("RealtimeCompactor is already finished")
+        if not chunk:
+            return ""
+        self._original_parts.append(chunk)
+        self._buffer += chunk
+
+        parts = self._buffer.splitlines(keepends=True)
+        if not parts:
+            return ""
+
+        if parts[-1].endswith(("\n", "\r")):
+            complete = parts
+            self._buffer = ""
+        else:
+            complete = parts[:-1]
+            self._buffer = parts[-1]
+
+        emitted: list[str] = []
+        for part in complete:
+            emitted.append(self._process_line(part, has_newline=True))
+        return "".join(emitted)
+
+    def finish(self) -> str:
+        """Flush the final partial line and return any remaining compacted output."""
+        if self.finished:
+            return ""
+        self.finished = True
+        if not self._buffer:
+            return ""
+        final = self._process_line(self._buffer, has_newline=False)
+        self._buffer = ""
+        return final
+
+    @property
+    def original(self) -> str:
+        return "".join(self._original_parts)
+
+    @property
+    def compacted(self) -> str:
+        return "".join(self._output_parts)
+
+    @property
+    def in_tokens(self) -> int:
+        return estimate_tokens(self.original)
+
+    @property
+    def out_tokens(self) -> int:
+        return estimate_tokens(self.compacted)
+
+    @property
+    def reduction_percent(self) -> float:
+        return reduction(self.original, self.compacted)
+
+    def result(self) -> CompactionResult:
+        """Return the cumulative result after all desired chunks have been fed."""
+        if not self.finished:
+            raise RuntimeError("Call finish() before requesting the final result")
+        return CompactionResult(
+            original=self.original,
+            compacted=self.compacted,
+            in_tokens=self.in_tokens,
+            out_tokens=self.out_tokens,
+            reduction_percent=self.reduction_percent,
+        )
+
+
+def compact_stream(chunks: Iterable[str], *, redact_secrets: bool = True) -> Iterator[str]:
+    """Yield compacted output incrementally as chunks arrive.
+
+    The generator emits output whenever a complete unique line becomes available.
+    The final partial line is emitted when the input iterator is exhausted.
+    """
+    compactor = RealtimeCompactor(redact_secrets=redact_secrets)
+    for chunk in chunks:
+        emitted = compactor.feed(chunk)
+        if emitted:
+            yield emitted
+    emitted = compactor.finish()
+    if emitted:
+        yield emitted
+
+
+def compact_text(text: str, *, redact_secrets: bool = True) -> str:
+    """Compact complete text conservatively without rewriting meaningful lines."""
+    return "".join(compact_stream([text], redact_secrets=redact_secrets)).rstrip("\n")
 
 
 def compact_text_with_metrics(text: str, *, redact_secrets: bool = True) -> CompactionResult:

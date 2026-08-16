@@ -9,27 +9,22 @@ AI Token Saver targets **about 55% fewer context/memory tokens** when the input 
 It provides:
 
 - 🧠 Compact project-memory structures
-- ♻️ Duplicate and filler removal
+- ♻️ Duplicate removal without deleting meaningful phrases
 - 📦 Stable, structured JSON memory storage
 - 🔀 Memory merging and deduplication
 - 📏 Approximate before/after token estimation
 - 🤖 Model/provider-agnostic skill instructions
 - 🔌 Designed to adapt to different AI assistants and coding agents
 - 🪨 Compatible with the Caveman skill without overriding it
-- 🔐 No storage of passwords, API keys, access tokens, or authentication codes
+- 🔐 Secret-looking values are redacted by default during text compaction
 
 ## Available for AI assistants
 
 AI Token Saver is **not locked to Claude, OpenAI, Gemini, or any other provider**.
 
-It can be adapted for:
-
-- Chat assistants
-- Coding agents
-- AI IDE assistants
-- Agent frameworks
-- Custom AI applications
-- Any AI system that supports custom skills, instructions, memory, or context files
+It can be adapted for chat assistants, coding agents, AI IDE assistants, agent
+frameworks, custom AI applications, and any AI system that supports custom
+skills, instructions, memory, or context files.
 
 Different AI platforms may have different skill formats and capabilities, so the
 installation method can vary. The core memory-saving rules remain provider-agnostic.
@@ -58,7 +53,7 @@ AI-token-saver/
 ├── ai_token_saver.py
 ├── README.md
 └── tests/
-    └── test_sparksave.py
+    └── test_ai_token_saver.py
 ```
 
 ### `SKILL.md`
@@ -67,8 +62,8 @@ Provider-agnostic skill instructions for saving and compressing AI context.
 
 ### `ai_token_saver.py`
 
-The Python implementation for text compaction, token estimation, structured
-memory, persistence, merging, and rendering.
+The Python implementation for text compaction, approximate token estimation,
+structured memory, persistence, merging, rendering, and default secret redaction.
 
 ## Quick start
 
@@ -110,13 +105,15 @@ print(memory_to_text(memory))
 python -m pytest
 ```
 
+The test suite covers duplicate removal, meaning preservation, reduction bounds,
+memory merging, JSON round-tripping, malformed-memory handling, and secret redaction.
+
 ## Token-saving philosophy
 
-AI Token Saver does **not** blindly delete context to hit a percentage. It
-prioritizes:
+AI Token Saver does **not** blindly delete context to hit a percentage. It prioritizes:
 
 1. Removing repeated information.
-2. Removing conversational filler.
+2. Removing unnecessary whitespace.
 3. Keeping one canonical current value.
 4. Preserving exact technical identifiers, paths, commands, models, versions,
    bugs, decisions, constraints, and next steps.
@@ -126,8 +123,9 @@ The goal is **less context, not less meaning**.
 
 ## Safety
 
-Do not put secrets into AI Token Saver memory. Never store passwords, API keys,
-access tokens, authentication codes, or private credentials.
+Never intentionally put secrets into AI Token Saver memory. Text compaction
+redacts common secret-looking values by default. This is a safety layer, not a
+guaranty of secret detection; do not rely on it as a credential manager.
 
 ## Status
 

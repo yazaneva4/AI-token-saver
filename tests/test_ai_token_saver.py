@@ -1,7 +1,19 @@
-from ai_token_saver import Memory, compact_text, compact_text_with_metrics, estimate_tokens, load_memory, memory_to_text, merge_memory, reduction, save_memory
+from ai_token_saver import (
+    Memory,
+    RealtimeCompactor,
+    compact_stream,
+    compact_text,
+    compact_text_with_metrics,
+    estimate_tokens,
+    load_memory,
+    memory_to_text,
+    merge_memory,
+    reduction,
+    save_memory,
+)
 
 
-def test_compact_removes_duplicates_without_deleting_meaning():
+def test_compact_removes_adjacent_duplicates_without_deleting_meaning():
     source = """Now, we need to save the project state.
 We need to save the project state.
 The current router is OpenSpark.
@@ -11,6 +23,35 @@ The current router is OpenSpark.
     assert result.count("OpenSpark") == 1
     assert "need to save the project state" in result
     assert estimate_tokens(result) < estimate_tokens(source)
+    assert result.endswith("\n")
+
+
+def test_non_adjacent_duplicate_code_lines_are_preserved():
+    source = """def hello():
+    print(\"hello\")
+    print(\"hello\")
+"""
+    result = compact_text(source, redact_secrets=False)
+    assert result == source
+
+
+def test_compaction_preserves_no_final_newline():
+    source = "same\nsame"
+    assert compact_text(source, redact_secrets=False) == "same"
+
+
+def test_aggressive_mode_does_not_globally_deduplicate_technical_content():
+    source = """def hello():
+    print(\"hello\")
+    print(\"hello\")
+"""
+    assert compact_text(source, redact_secrets=False, aggressive=True) == source
+
+
+def test_aggressive_mode_can_deduplicate_repetitive_prose():
+    source = "one fact\ntwo facts\none fact\n"
+    result = compact_text(source, redact_secrets=False, aggressive=True)
+    assert result == "one fact\ntwo facts\n"
 
 
 def test_reduction_is_bounded():
@@ -66,6 +107,26 @@ def test_secret_redaction():
     assert "[REDACTED]" in result
 
 
+def test_redaction_modes():
+    source = "api_key=SECRET123 AIKey=AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+    common = compact_text(source, redaction_mode="common")
+    strict = compact_text(source, redaction_mode="strict")
+    off = compact_text(source, redaction_mode="off")
+    assert "SECRET123" not in common
+    assert "AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456" in common
+    assert "AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456" not in strict
+    assert "SECRET123" in off
+
+
+def test_invalid_redaction_mode_is_rejected():
+    try:
+        compact_text("hello", redaction_mode="invalid")  # type: ignore[arg-type]
+    except ValueError as exc:
+        assert "redaction_mode" in str(exc)
+    else:
+        raise AssertionError("invalid redaction mode must be rejected")
+
+
 def test_compact_text_with_metrics_returns_all_fields():
     source = "same line\nsame line\nunique line\n"
     result = compact_text_with_metrics(source)
@@ -76,11 +137,119 @@ def test_compact_text_with_metrics_returns_all_fields():
     assert result.out_tokens > 0
     assert result.out_tokens <= result.in_tokens
     assert 0.0 <= result.reduction_percent <= 1.0
+    assert result.token_count_is_exact is False
+    assert result.token_count_source == "approximate"
 
 
 def test_compact_text_with_metrics_shows_real_savings():
     repetitive = "duplicate\n" * 100 + "unique\n"
     result = compact_text_with_metrics(repetitive)
-    # Should have high reduction due to many duplicates
-    assert result.reduction_percent > 0.9  # More than 90% reduction
+    assert result.reduction_percent > 0.9
     assert result.in_tokens > result.out_tokens
+
+
+def test_exact_token_counter_is_used_and_marked_exact():
+    def counter(text: str) -> int:
+        return len(text.split())
+
+    result = compact_text_with_metrics(
+        "one two\none two\nthree\n",
+        tokenizer=counter,
+    )
+    assert result.in_tokens == 5
+    assert result.out_tokens == 3
+    assert result.token_count_is_exact is True
+    assert result.token_count_source == "supplied-tokenizer"
+    assert result.reduction_percent == 0.4
+
+
+def test_realtime_compactor_handles_split_chunks_and_deduplicates_adjacent_lines():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    assert compactor.feed("hello\nhel") == "hello\n"
+    assert compactor.feed("lo\nhello\nworld") == ""
+    assert compactor.finish() == "world"
+    assert compactor.compacted == "hello\nworld"
+    assert compactor.original == "hello\nhello\nhello\nworld"
+
+
+def test_realtime_compactor_preserves_repeated_code_lines():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    emitted = compactor.feed("def hello():\n    print(\"hello\")\n    print(\"hello\")")
+    emitted += compactor.finish()
+    assert emitted == "def hello():\n    print(\"hello\")\n    print(\"hello\")"
+
+
+def test_realtime_compactor_reports_metrics_after_finish():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    compactor.feed("same\nsame\nunique")
+    compactor.finish()
+    result = compactor.result()
+    assert result.original == "same\nsame\nunique"
+    assert result.compacted == "same\nunique"
+    assert result.in_tokens > result.out_tokens
+    assert result.reduction_percent > 0
+
+
+def test_compact_stream_is_incremental_and_matches_compaction():
+    chunks = ["one\n", "two\n", "two\nthree", "\n"]
+    output = "".join(compact_stream(chunks, redact_secrets=False))
+    assert output == "one\ntwo\nthree\n"
+    assert output == compact_text("one\ntwo\ntwo\nthree\n", redact_secrets=False)
+
+
+def test_realtime_handles_split_crlf_without_extra_blank_output():
+    output = "".join(compact_stream(["one\r", "\ntwo\r\n", "three"], redact_secrets=False))
+    assert output == "one\ntwo\nthree"
+
+
+def test_realtime_rejects_feed_after_finish():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    compactor.feed("done")
+    assert compactor.finish() == "done"
+    assert compactor.finish() == ""
+    try:
+        compactor.feed("more")
+    except RuntimeError as exc:
+        assert "already finished" in str(exc)
+    else:
+        raise AssertionError("feed() must reject chunks after finish()")
+
+
+def test_realtime_result_requires_finish():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    compactor.feed("hello\n")
+    try:
+        compactor.result()
+    except RuntimeError as exc:
+        assert "Call finish()" in str(exc)
+    else:
+        raise AssertionError("result() must require finish()")
+    compactor.finish()
+    assert compactor.result().compacted == "hello\n"
+
+
+def test_realtime_secret_redaction_across_chunks():
+    output = list(compact_stream(["api_key=SEC", "RET123\n", "Bearer ", "abc123\n"]))
+    combined = "".join(output)
+    assert "SECRET123" not in combined
+    assert "abc123" not in combined
+    assert "[REDACTED]" in combined
+
+
+def test_invalid_stream_chunk_type_is_rejected():
+    compactor = RealtimeCompactor(redact_secrets=False)
+    try:
+        compactor.feed(123)  # type: ignore[arg-type]
+    except TypeError as exc:
+        assert "chunk must be a string" in str(exc)
+    else:
+        raise AssertionError("non-string chunks must be rejected")
+
+
+def test_invalid_text_type_is_rejected():
+    try:
+        compact_text(123)  # type: ignore[arg-type]
+    except TypeError as exc:
+        assert "text must be a string" in str(exc)
+    else:
+        raise AssertionError("non-string text must be rejected")

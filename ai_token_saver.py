@@ -1,8 +1,8 @@
 """AI Token Saver: compact, dependency-free project context storage.
 
 The module provides deterministic text compaction, approximate token estimation,
-and a small JSON memory store. It targets roughly 55% context reduction when
-input contains repetition/filler, but never promises an exact ratio.
+and a small JSON memory store. Compaction reports the reduction actually achieved;
+there is no guaranteed percentage because savings depend on the input.
 """
 
 from __future__ import annotations
@@ -72,8 +72,9 @@ def estimate_tokens(text: str) -> int:
     return max(1, round(len(text) / 4))
 
 
-def _normalize(line: str) -> str:
-    return _SPACE.sub(" ", line.strip())
+def _comparison_key(line: str) -> str:
+    """Create a whitespace-insensitive comparison key without altering output."""
+    return _SPACE.sub(" ", line.strip()).casefold()
 
 
 def _redact_secrets(text: str) -> str:
@@ -86,14 +87,17 @@ def _redact_secrets(text: str) -> str:
 
 
 def deduplicate(lines: Iterable[str]) -> list[str]:
-    """Remove normalized duplicate lines while preserving order and meaning."""
+    """Remove duplicate lines while preserving the first line's exact content."""
     result: list[str] = []
     seen: set[str] = set()
     for raw in lines:
-        line = _normalize(raw)
-        if not line:
+        # Preserve indentation and internal spacing in the emitted line. Only
+        # trailing whitespace is removed; whitespace is normalized only for
+        # duplicate detection so code/commands are not silently rewritten.
+        line = raw.rstrip()
+        if not line.strip():
             continue
-        key = line.casefold()
+        key = _comparison_key(line)
         if key in seen:
             continue
         seen.add(key)
@@ -102,24 +106,19 @@ def deduplicate(lines: Iterable[str]) -> list[str]:
 
 
 def compact_text(text: str, *, redact_secrets: bool = True) -> str:
-    """Compact text conservatively without deleting meaningful phrases.
+    """Compact text conservatively without rewriting meaningful line content.
 
-    Only whitespace normalization and duplicate-line removal are performed.
-    Secret-looking values are redacted by default before the result is returned.
+    Duplicate detection is whitespace-insensitive, but the first occurrence is
+    emitted exactly (apart from trailing whitespace). Secret-looking values are
+    redacted by default before compaction.
     """
     source = _redact_secrets(text) if redact_secrets else text
     return "\n".join(deduplicate(source.splitlines()))
 
 
 def compact_text_with_metrics(text: str, *, redact_secrets: bool = True) -> CompactionResult:
-    """Compact text and return detailed metrics including in/out token counts.
-    
-    This function provides the same compaction as compact_text() but also
-    returns the original text, estimated input tokens, estimated output tokens,
-    and the actual reduction percentage achieved.
-    """
-    source = _redact_secrets(text) if redact_secrets else text
-    compacted = "\n".join(deduplicate(source.splitlines()))
+    """Compact text and return detailed approximate token metrics."""
+    compacted = compact_text(text, redact_secrets=redact_secrets)
     in_tokens = estimate_tokens(text)
     out_tokens = estimate_tokens(compacted)
     reduction_pct = reduction(text, compacted)
@@ -223,11 +222,11 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     source = args.text or ""
-    
+
     if args.verbose:
         result = compact_text_with_metrics(source, redact_secrets=not args.keep_secrets)
         print(result.compacted)
-        print(f"\n--- Metrics ---")
+        print("\n--- Metrics ---")
         print(f"Input tokens:  {result.in_tokens}")
         print(f"Output tokens: {result.out_tokens}")
         print(f"Saved tokens:  {result.in_tokens - result.out_tokens}")

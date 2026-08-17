@@ -28,6 +28,39 @@ def test_realtime_code_guard_works_when_code_marker_arrives_in_later_chunk():
     assert output == first + second
 
 
+def test_simple_python_assignment_is_protected_as_code():
+    code = ["x = 1", "x = 1"]
+    assert deduplicate(code, aggressive=True) == code
+
+
+def test_common_python_code_hints_are_protected():
+    code = [
+        "print('hello')",
+        "print('hello')",
+        "yield value",
+        "yield value",
+        "raise RuntimeError('boom')",
+        "raise RuntimeError('boom')",
+        "assert value",
+        "assert value",
+        "with open('file.txt') as f:",
+        "with open('file.txt') as f:",
+        "try:",
+        "try:",
+        "except ValueError:",
+        "except ValueError:",
+    ]
+    assert deduplicate(code, aggressive=True) == code
+
+
+def test_bare_apikey_is_not_redacted_but_api_key_is():
+    text = "apikey=keep-this\napi_key=hide-this\napi-key=hide-this-too"
+    result = compact_text(text, redact_secrets=True)
+    assert "apikey=keep-this" in result
+    assert "api_key=[REDACTED]" in result
+    assert "api-key=[REDACTED]" in result
+
+
 def test_metrics_report_output_growth_after_redaction():
     text = "secret=abc"
     result = compact_text_with_metrics(text, redact_secrets=True, tokenizer=lambda value: len(value))

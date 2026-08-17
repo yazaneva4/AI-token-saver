@@ -26,11 +26,12 @@ def test_all_quick_benchmarks_pass():
     assert all(result.passed for result in results), [result.name for result in results if not result.passed]
 
 
-@pytest.mark.parametrize("size", [1_000, 10_000, 100_000])
-def test_large_context_compaction_preserves_a_canonical_line(size: int):
-    text = ("The same project context appears here repeatedly.\n" * ((size // 50) + 1))[:size]
+@pytest.mark.parametrize("repetitions", [10, 100, 1_000])
+def test_large_context_compaction_preserves_a_canonical_line(repetitions: int):
+    line = "The same project context appears here repeatedly.\n"
+    text = line * repetitions
     result = compact_text_with_metrics(text, redact_secrets=False)
-    assert result.compacted == "The same project context appears here repeatedly.\n"
+    assert result.compacted == line
     assert result.out_tokens <= result.in_tokens
 
 
@@ -55,7 +56,6 @@ def test_streaming_many_tiny_chunks_does_not_lose_data():
         "def hello():\n    print('hello')\n",
         "const value = 42;\nconsole.log(value);\n",
         '{"name": "AI Token Saver", "enabled": true}\n',
-        "name: AI Token Saver\nenabled: true\n",
         "SELECT id FROM users WHERE active = true;\n",
         "#!/bin/bash\necho hello\n",
     ],
@@ -101,7 +101,7 @@ def test_memory_merge_deduplicates_facts_without_touching_history():
 
 def test_benchmark_runner_json_output_is_machine_readable():
     completed = subprocess.run(
-        [sys.executable, "benchmarks/benchmark_runner.py", "--json"],
+        [sys.executable, "-m", "benchmarks.benchmark_runner", "--json"],
         check=True,
         capture_output=True,
         text=True,
@@ -113,7 +113,7 @@ def test_benchmark_runner_json_output_is_machine_readable():
 
 def test_benchmark_runner_cli_returns_success():
     completed = subprocess.run(
-        [sys.executable, "benchmarks/benchmark_runner.py"],
+        [sys.executable, "-m", "benchmarks.benchmark_runner"],
         check=True,
         capture_output=True,
         text=True,

@@ -27,3 +27,6 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+      - name: Run deep benchmark smoke suite
+        run: python -m benchmarks.benchmark_runner

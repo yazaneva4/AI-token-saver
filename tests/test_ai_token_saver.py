@@ -98,11 +98,11 @@ def test_malformed_memory_has_safe_defaults(tmp_path):
 
 
 def test_secret_redaction():
-    source = "api_key=SECRET123 password=hunter2 Bearer abc123 sk-abcdefghijklmnopqrstuvwxyz"
+    source = "api_key=SECRET123 password=hunter2 Bearer abcdefghijklmnop sk-abcdefghijklmnopqrstuvwxyz"
     result = compact_text(source)
     assert "SECRET123" not in result
     assert "hunter2" not in result
-    assert "abc123" not in result
+    assert "abcdefghijklmnop" not in result
     assert "sk-abcdefghijklmnopqrstuvwxyz" not in result
     assert "[REDACTED]" in result
 
@@ -229,10 +229,10 @@ def test_realtime_result_requires_finish():
 
 
 def test_realtime_secret_redaction_across_chunks():
-    output = list(compact_stream(["api_key=SEC", "RET123\n", "Bearer ", "abc123\n"]))
+    output = list(compact_stream(["api_key=SEC", "RET123\n", "Bearer ", "abcdefghijklmnop\n"]))
     combined = "".join(output)
     assert "SECRET123" not in combined
-    assert "abc123" not in combined
+    assert "abcdefghijklmnop" not in combined
     assert "[REDACTED]" in combined
 
 

@@ -146,7 +146,6 @@ def _looks_like_code_line(line: str) -> bool:
         return False
     if _CODE_SYNTAX.match(stripped) or any(hint in stripped for hint in _CODE_HINTS):
         return True
-    # Any valid JSON object or array is technical content, including numeric arrays.
     if _JSON_OBJECT.match(stripped) or _JSON_ARRAY.match(stripped):
         try:
             parsed = json.loads(stripped)
@@ -186,6 +185,24 @@ def deduplicate(lines: Iterable[str], *, aggressive: bool = False) -> list[str]:
             result.append(line)
             seen.add(key)
         previous_key = key
+    return result
+
+
+def _deduplicate_memory_facts(lines: Iterable[str]) -> list[str]:
+    """Deduplicate stored memory facts independently of conversation code detection."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw in lines:
+        if not isinstance(raw, str):
+            raise TypeError("memory facts must contain only strings")
+        line = raw.rstrip("\r\n")
+        if not line.strip():
+            continue
+        key = _line_key(line)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(line)
     return result
 
 
@@ -477,7 +494,7 @@ def load_memory(path: str | Path) -> Memory:
 
 
 def merge_list(current: Iterable[str], incoming: Iterable[str]) -> list[str]:
-    return deduplicate([*current, *incoming], aggressive=True)
+    return _deduplicate_memory_facts([*current, *incoming])
 
 
 def merge_memory(current: Memory, incoming: Memory) -> Memory:
@@ -509,7 +526,7 @@ def memory_to_text(memory: Memory) -> str:
         ("PREFERENCES", memory.preferences),
         ("HISTORY", memory.history),
     ]:
-        values = deduplicate(values, aggressive=True)
+        values = _deduplicate_memory_facts(values)
         if values:
             sections.append(title + ":\n" + "\n".join(f"- {value}" for value in values))
     return "\n\n".join(sections)

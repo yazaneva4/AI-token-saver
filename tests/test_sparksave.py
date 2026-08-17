@@ -29,12 +29,7 @@ def test_merge_memory_deduplicates():
 
 
 def test_memory_render_is_compact_and_structured():
-    memory = Memory(
-        project="OpenSpark",
-        goal="AI auto-router",
-        state=["provider system added"],
-        next_steps=["add tests"],
-    )
+    memory = Memory(project="OpenSpark", goal="AI auto-router", state=["provider system added"], next_steps=["add tests"])
     text = memory_to_text(memory)
     assert "PROJECT: OpenSpark" in text
     assert "STATE:" in text
@@ -54,6 +49,41 @@ def test_malformed_memory_has_safe_defaults(tmp_path):
     memory = load_memory(path)
     assert memory.project == ""
     assert memory.state == []
+
+
+def test_secret_redaction_requires_real_api_key_separator():
+    source = "api_key=SECRET123 api-key=SECRET456 apikey=KEEP_ME"
+    result = compact_text(source)
+    assert "SECRET123" not in result
+    assert "SECRET456" not in result
+    assert "apikey=KEEP_ME" in result
+
+
+def test_bearer_redaction_requires_minimum_length():
+    source = "Bearer short Bearer abcdefghijklmnop"
+    result = compact_text(source)
+    assert "Bearer short" in result
+    assert "abcdefghijklmnop" not in result
+
+
+def test_code_hints_protect_single_hint_lines_from_aggressive_deduplication():
+    for line in ('print("hello")', "value = lambda x: x + 1", "yield value", "raise ValueError()", "assert value", "with open('x') as f:", "try:", "except ValueError:", "async def run():", "return value", "import os"):
+        source = f"{line}\n{line}\n"
+        result = compact_text(source, aggressive=True)
+        assert result.count(line) == 2, line
+
+
+def test_json_objects_and_arrays_are_technical_content():
+    for value in ('{"key": "value"}', '[1, 2, 3]'):
+        source = f"{value}\n{value}\n"
+        result = compact_text(source, aggressive=True)
+        assert result.count(value) == 2, value
+
+
+def test_nontechnical_prose_still_deduplicates_aggressively():
+    source = "hello world\nhello world\n"
+    result = compact_text(source, aggressive=True)
+    assert result == "hello world"
 
 
 def test_secret_redaction():

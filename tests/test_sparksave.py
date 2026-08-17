@@ -28,6 +28,13 @@ def test_merge_memory_deduplicates():
     assert merged.state == ["router works", "provider system added"]
 
 
+def test_merge_memory_deduplicates_code_like_facts():
+    a = Memory(state=["x = 1", 'print("hello")', '{"key": "value"}'])
+    b = Memory(state=["x = 1", 'print("hello")', '{"key": "value"}', "return value"])
+    merged = merge_memory(a, b)
+    assert merged.state == ["x = 1", 'print("hello")', '{"key": "value"}', "return value"]
+
+
 def test_memory_render_is_compact_and_structured():
     memory = Memory(project="OpenSpark", goal="AI auto-router", state=["provider system added"], next_steps=["add tests"])
     text = memory_to_text(memory)

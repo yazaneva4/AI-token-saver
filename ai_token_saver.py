@@ -47,13 +47,29 @@ class Memory:
         return cls(**values)
 
 _SECRET_PATTERNS = (
-    re.compile(r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"),
+    # Deliberately require the separator in api_key/api-key; do not redact bare "apikey".
+    re.compile(r"(?i)(\b(?:api[_-]key|access[_-]?token|auth[_-]?token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"),
     re.compile(r"(?i)(\bBearer\s+)([A-Za-z0-9._~+/=-]+)"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
     re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"),
 )
-_CODE_HINTS = ("```", "#!/", "import ", "from ", "def ", "class ", "function ", "const ", "let ", "var ", "return ", "SELECT ", "INSERT ", "curl ", "npm ", "pip ", "python ", "powershell ", "docker ", "kubectl ", "=>", "::", "&&", "||", "./", "../")
-_CODE_SYNTAX = re.compile(r"^\s*(?:(?:def|class)\s+\w+.*:\s*$|(?:if|for|while)\b.*:\s*$|(?:import|from)\s+\S+|return\b)")
+_CODE_HINTS = (
+    "```", "#!/", "import ", "from ", "def ", "class ", "function ",
+    "const ", "let ", "var ", "return ", "print(", "lambda ", "yield ",
+    "raise ", "assert ", "with ", "try:", "except", "finally:", "async ",
+    "await ", "elif ", "else:", "match ", "case ", "SELECT ", "INSERT ",
+    "UPDATE ", "DELETE ", "curl ", "npm ", "pip ", "python ", "powershell ",
+    "docker ", "kubectl ", "=>", "::", "&&", "||", "./", "../",
+)
+_CODE_SYNTAX = re.compile(
+    r"^\s*(?:"
+    r"(?:def|class|if|elif|else|for|while|try|except|finally|with|match|case)\b.*:?\s*$|"
+    r"(?:import|from)\s+\S+|"
+    r"(?:return|yield|raise|assert|print|lambda)\b.*$|"
+    r"(?:async\s+def|async\s+for|await\b).*$|"
+    r"[A-Za-z_][A-Za-z0-9_.\[\]]*\s*(?:=|:=|\+=|-=|\*=|/=|//=|%=|\*\*=|&=|\|=|\^=|<<=|>>=)\s*.+$"
+    r")"
+)
 
 def _fallback_token_count(text: str) -> int: return 0 if not text.strip() else max(1, round(len(text) / 4))
 
@@ -84,10 +100,16 @@ def _validate_redaction_mode(mode: RedactionMode) -> None:
 
 def _line_key(line: str) -> str: return line.rstrip(" \t")
 
+def _looks_like_code_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped: return False
+    return bool(_CODE_SYNTAX.match(stripped)) or any(hint in stripped for hint in _CODE_HINTS)
+
 def _looks_like_technical_content(lines: list[str]) -> bool:
-    sample = "\n".join(lines[:80])
+    sample_lines = lines[:80]
+    sample = "\n".join(sample_lines)
     if not sample.strip(): return False
-    if "```" in sample or any(_CODE_SYNTAX.match(line) for line in lines[:80]): return True
+    if any(_looks_like_code_line(line) for line in sample_lines): return True
     return sum(1 for hint in _CODE_HINTS if hint in sample) >= 2
 
 def deduplicate(lines: Iterable[str], *, aggressive: bool = False) -> list[str]:
@@ -127,7 +149,10 @@ class RealtimeCompactor:
         if self.aggressive and not self._technical and not force and len(self._pending_lines) < self._LOOKAHEAD_LINES: return ""
         pending = self._pending_lines; self._pending_lines = []; output: list[str] = []
         for line, newline in pending:
-            key = _line_key(line); duplicate = False if self._technical else (key in self._seen if self.aggressive else key == self._previous_key)
+            key = _line_key(line)
+            # A line that independently looks like code is never treated as a removable duplicate.
+            code_line = _looks_like_code_line(line)
+            duplicate = False if self._technical or code_line else (key in self._seen if self.aggressive else key == self._previous_key)
             self._previous_key = key
             if duplicate: continue
             self._seen.add(key); value = line + newline; self._output_parts.append(value); output.append(value)
@@ -137,7 +162,7 @@ class RealtimeCompactor:
         if not line.strip(): return ""
         if self.aggressive:
             self._pending_lines.append((line, newline)); return self._flush_pending()
-        self._technical = self._technical or _looks_like_technical_content([line])
+        self._technical = self._technical or _looks_like_code_line(line) or _looks_like_technical_content([line])
         key = _line_key(line); duplicate = False if self._technical else key == self._previous_key; self._previous_key = key
         if duplicate: return ""
         self._seen.add(key); value = line + newline; self._output_parts.append(value); return value

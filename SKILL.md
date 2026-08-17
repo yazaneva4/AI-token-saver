@@ -237,6 +237,31 @@ When evaluating savings:
 - If no reliable measurement is available, say that the result is an estimate
   instead of inventing a number.
 
+### Deep Benchmark Engine
+
+The repository includes `benchmarks/benchmark_runner.py` and
+`tests/test_deep_benchmark_engine.py` for repeatable verification of the public
+compaction behavior.
+
+The deep benchmark suite covers:
+
+- large-context compaction at representative sizes, with optional 1 MB, 5 MB,
+  and 10 MB deep runs;
+- real-time streaming with tiny and varied chunk boundaries;
+- preservation of executable and structured technical content;
+- default/common/strict secret-redaction behavior using only fake test values;
+- supplied token-counter reporting and fallback measurement semantics;
+- structured memory fact consolidation without rewriting history.
+
+Use `python -m benchmarks.benchmark_runner` for the CI-safe smoke suite. Use
+`python -m benchmarks.benchmark_runner --deep` for the larger context run.
+Use `--json` when machine-readable benchmark records are needed.
+
+Benchmark results are evidence for the tested inputs and environment only. Do
+not turn a benchmark result into a universal savings promise. The benchmark
+runner must fail when a required behavior does not pass, and CI runs the smoke
+suite after the normal pytest suite.
+
 ## Safe Token Optimization
 
 When saving context:

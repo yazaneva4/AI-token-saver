@@ -83,7 +83,7 @@ def test_json_objects_and_arrays_are_technical_content():
 def test_nontechnical_prose_still_deduplicates_aggressively():
     source = "hello world\nhello world\n"
     result = compact_text(source, aggressive=True)
-    assert result == "hello world"
+    assert result == "hello world\n"
 
 
 def test_secret_redaction():

@@ -35,20 +35,12 @@ def test_simple_python_assignment_is_protected_as_code():
 
 def test_common_python_code_hints_are_protected():
     code = [
-        "print('hello')",
-        "print('hello')",
-        "yield value",
-        "yield value",
-        "raise RuntimeError('boom')",
-        "raise RuntimeError('boom')",
-        "assert value",
-        "assert value",
-        "with open('file.txt') as f:",
-        "with open('file.txt') as f:",
-        "try:",
-        "try:",
-        "except ValueError:",
-        "except ValueError:",
+        "print('hello')", "print('hello')",
+        "yield value", "yield value",
+        "raise RuntimeError('boom')", "raise RuntimeError('boom')",
+        "assert value", "assert value",
+        "with open('file.txt') as f:", "with open('file.txt') as f:",
+        "try:", "try:", "except ValueError:", "except ValueError:",
     ]
     assert deduplicate(code, aggressive=True) == code
 
@@ -59,6 +51,16 @@ def test_bare_apikey_is_not_redacted_but_api_key_is():
     assert "apikey=keep-this" in result
     assert "api_key=[REDACTED]" in result
     assert "api-key=[REDACTED]" in result
+
+
+def test_duplicate_json_objects_are_protected_in_aggressive_mode():
+    json_lines = ['{"key": "value"}', '{"key": "value"}']
+    assert deduplicate(json_lines, aggressive=True) == json_lines
+
+
+def test_duplicate_json_arrays_are_protected_in_aggressive_mode():
+    json_lines = ['["one", "two"]', '["one", "two"]']
+    assert deduplicate(json_lines, aggressive=True) == json_lines
 
 
 def test_metrics_report_output_growth_after_redaction():

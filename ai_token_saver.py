@@ -47,9 +47,9 @@ class Memory:
         return cls(**values)
 
 _SECRET_PATTERNS = (
-    # Deliberately require the separator in api_key/api-key; do not redact bare "apikey".
     re.compile(r"(?i)(\b(?:api[_-]key|access[_-]?token|auth[_-]?token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"),
-    re.compile(r"(?i)(\bBearer\s+)([A-Za-z0-9._~+/=-]+)"),
+    # Require a reasonably long bearer credential to avoid redacting ordinary prose such as "Bearer test".
+    re.compile(r"(?i)(\bBearer\s+)([A-Za-z0-9._~+/=-]{16,})"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
     re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"),
 )
@@ -122,7 +122,6 @@ def _looks_like_technical_content(lines: list[str]) -> bool:
     return any(hint in sample for hint in _CODE_HINTS)
 
 def deduplicate(lines: Iterable[str], *, aggressive: bool = False) -> list[str]:
-    """Remove safe redundancy while preserving technical/code-like content."""
     source = list(lines)
     if any(not isinstance(line, str) for line in source): raise TypeError("lines must contain only strings")
     if _looks_like_technical_content(source): return [line.rstrip("\r\n") for line in source if line.rstrip("\r\n").strip()]
@@ -143,7 +142,6 @@ def _compact_lines(text: str, *, redact_mode: RedactionMode, aggressive: bool = 
     return result
 
 class RealtimeCompactor:
-    """Compact complete lines while protecting code detected later in aggressive streams."""
     _LOOKAHEAD_LINES = 4
     def __init__(self, *, redact_secrets: bool = True, redaction_mode: RedactionMode | None = None, tokenizer: TokenizerLike | None = None, aggressive: bool = False):
         if redaction_mode is None: redaction_mode = "common" if redact_secrets else "off"

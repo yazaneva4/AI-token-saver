@@ -70,6 +70,8 @@ _CODE_SYNTAX = re.compile(
     r"[A-Za-z_][A-Za-z0-9_.\[\]]*\s*(?:=|:=|\+=|-=|\*=|/=|//=|%=|\*\*=|&=|\|=|\^=|<<=|>>=)\s*.+$"
     r")"
 )
+_JSON_OBJECT = re.compile(r"^\s*\{.*\}\s*$", re.DOTALL)
+_JSON_ARRAY = re.compile(r"^\s*\[.*\]\s*$", re.DOTALL)
 
 def _fallback_token_count(text: str) -> int: return 0 if not text.strip() else max(1, round(len(text) / 4))
 
@@ -103,14 +105,21 @@ def _line_key(line: str) -> str: return line.rstrip(" \t")
 def _looks_like_code_line(line: str) -> bool:
     stripped = line.strip()
     if not stripped: return False
-    return bool(_CODE_SYNTAX.match(stripped)) or any(hint in stripped for hint in _CODE_HINTS)
+    if _CODE_SYNTAX.match(stripped) or any(hint in stripped for hint in _CODE_HINTS): return True
+    if (_JSON_OBJECT.match(stripped) or _JSON_ARRAY.match(stripped)) and (":" in stripped or '"' in stripped):
+        try:
+            parsed = json.loads(stripped)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        return isinstance(parsed, (dict, list))
+    return False
 
 def _looks_like_technical_content(lines: list[str]) -> bool:
     sample_lines = lines[:80]
     sample = "\n".join(sample_lines)
     if not sample.strip(): return False
     if any(_looks_like_code_line(line) for line in sample_lines): return True
-    return sum(1 for hint in _CODE_HINTS if hint in sample) >= 2
+    return any(hint in sample for hint in _CODE_HINTS)
 
 def deduplicate(lines: Iterable[str], *, aggressive: bool = False) -> list[str]:
     """Remove safe redundancy while preserving technical/code-like content."""
@@ -149,9 +158,7 @@ class RealtimeCompactor:
         if self.aggressive and not self._technical and not force and len(self._pending_lines) < self._LOOKAHEAD_LINES: return ""
         pending = self._pending_lines; self._pending_lines = []; output: list[str] = []
         for line, newline in pending:
-            key = _line_key(line)
-            # A line that independently looks like code is never treated as a removable duplicate.
-            code_line = _looks_like_code_line(line)
+            key = _line_key(line); code_line = _looks_like_code_line(line)
             duplicate = False if self._technical or code_line else (key in self._seen if self.aggressive else key == self._previous_key)
             self._previous_key = key
             if duplicate: continue

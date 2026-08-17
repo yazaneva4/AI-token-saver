@@ -125,6 +125,46 @@ that operation.
 Never treat API keys, passwords, or credentials as ordinary context merely because
 they are important to the project.
 
+## Bug-Fixing and Verification Discipline
+
+When another AI, user, test report, review, or tool reports a bug, treat the report
+as a hypothesis until it is verified against the current implementation and tests.
+
+- Inspect the current source and relevant tests before changing code.
+- Reproduce or otherwise verify the reported behavior when practical.
+- Do not blindly implement a suggested fix just because it appears in a bug report.
+- If the report is based on a misunderstanding of the requirements or current
+  behavior, do not introduce the proposed change; explain why and keep the safer
+  implementation.
+- Distinguish real regressions from stale tests, stale reports, expected behavior,
+  and incorrect assumptions.
+- Prefer the smallest change that fixes the verified root cause.
+- Preserve unrelated working behavior.
+- Add or update a regression test for each verified bug when a test is appropriate.
+- Run the relevant test suite after changes and inspect the actual failure output
+  when tests fail.
+- Do not claim a test is passing unless the test was actually run or reliable CI
+  evidence is available.
+- Do not claim a bug is fixed merely because code was changed.
+- When multiple supported Python versions are tested by CI, verify the complete
+  matrix before declaring the change stable.
+- If a failure is caused by a test that contradicts the intended behavior, fix the
+  test only after verifying the implementation and requirement; never weaken
+  correct production behavior solely to make CI green.
+
+## Change Scope and Skill Integrity
+
+Do not modify `SKILL.md` as a side effect of ordinary code fixes.
+
+- Change `SKILL.md` only when the user explicitly requests a skill/instruction
+  change or when the task explicitly includes skill documentation.
+- When modifying `SKILL.md`, preserve unrelated rules and make the smallest
+  documentation change needed.
+- Never rewrite the whole skill merely to address a code bug unless the user asks
+  for a full rewrite.
+- Keep implementation behavior, tests, and skill instructions consistent, but do
+  not silently change one to compensate for an unrelated defect in another.
+
 ## Provider Integration
 
 When integrating with an AI provider:

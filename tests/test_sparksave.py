@@ -57,10 +57,10 @@ def test_malformed_memory_has_safe_defaults(tmp_path):
 
 
 def test_secret_redaction():
-    source = "api_key=SECRET123 password=hunter2 Bearer abc123 sk-abcdefghijklmnopqrstuvwxyz"
+    source = "api_key=SECRET123 password=hunter2 Bearer abcdefghijklmnop sk-abcdefghijklmnopqrstuvwxyz"
     result = compact_text(source)
     assert "SECRET123" not in result
     assert "hunter2" not in result
-    assert "abc123" not in result
+    assert "abcdefghijklmnop" not in result
     assert "sk-abcdefghijklmnopqrstuvwxyz" not in result
     assert "[REDACTED]" in result

@@ -305,26 +305,28 @@ class RealtimeCompactor:
         self._original_parts.append(chunk)
         self._buffer += chunk
         output: list[str] = []
-        start = 0
-        i = 0
-        while i < len(self._buffer):
-            char = self._buffer[i]
-            if char == "\n":
-                raw_end = i - 1 if i > start and self._buffer[i - 1] == "\r" else i
-                output.append(self._process_line(self._buffer[start:raw_end], "\n"))
-                start = i + 1
-            elif char == "\r":
-                if i + 1 >= len(self._buffer):
-                    break
-                if self._buffer[i + 1] == "\n":
-                    output.append(self._process_line(self._buffer[start:i], "\n"))
-                    start = i + 2
-                    i += 1
-                else:
-                    output.append(self._process_line(self._buffer[start:i], "\n"))
-                    start = i + 1
-            i += 1
-        self._buffer = self._buffer[start:]
+
+        # Only retain the final incomplete line. The previous character-by-character
+        # scanner repeatedly rescanned the entire unterminated buffer when a stream
+        # delivered one character at a time, making streaming effectively O(n^2).
+        trailing_cr = self._buffer.endswith("\r")
+        scan_buffer = self._buffer[:-1] if trailing_cr else self._buffer
+        parts = scan_buffer.splitlines(keepends=True)
+        self._buffer = ""
+        if parts and not parts[-1].endswith(("\n", "\r")):
+            self._buffer = parts.pop()
+        if trailing_cr:
+            self._buffer += "\r"
+
+        for part in parts:
+            if part.endswith("\r\n"):
+                output.append(self._process_line(part[:-2], "\n"))
+            elif part.endswith("\n") or part.endswith("\r"):
+                output.append(self._process_line(part[:-1], "\n"))
+            else:
+                # Defensive fallback; normally only the final incomplete part reaches here.
+                self._buffer = part + self._buffer
+
         return "".join(output)
 
     def finish(self) -> str:
@@ -333,8 +335,14 @@ class RealtimeCompactor:
         self.finished = True
         output: list[str] = []
         if self._buffer:
-            output.append(self._process_line(self._buffer, ""))
+            buffer = self._buffer
             self._buffer = ""
+            if buffer.endswith("\r\n"):
+                output.append(self._process_line(buffer[:-2], "\n"))
+            elif buffer.endswith(("\n", "\r")):
+                output.append(self._process_line(buffer[:-1], "\n"))
+            else:
+                output.append(self._process_line(buffer, ""))
         output.append(self._flush_pending(force=True))
         return "".join(output)
 

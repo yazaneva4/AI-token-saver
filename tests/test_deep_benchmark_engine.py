@@ -45,9 +45,11 @@ def test_streaming_is_chunk_boundary_independent(chunk_size: int):
 def test_streaming_many_tiny_chunks_does_not_lose_data():
     text = "x" * 5_000 + "\n"
     compactor = RealtimeCompactor(redact_secrets=False)
+    emitted: list[str] = []
     for char in text:
-        compactor.feed(char)
-    assert compactor.finish() == text
+        emitted.append(compactor.feed(char))
+    emitted.append(compactor.finish())
+    assert "".join(emitted) == text
 
 
 @pytest.mark.parametrize(

@@ -168,6 +168,11 @@ class ContextSaver:
     def save_if_changed(self, state: Mapping[str, object]) -> ContextSaveResult | None:
         snapshot = self.build(state)
         fingerprint = snapshot.fingerprint()
+        # Re-read durable state on every idempotency check so a long-lived saver
+        # cannot keep a stale fingerprint after another process has updated it.
+        persistent_fingerprint = self._load_fingerprint()
+        if persistent_fingerprint is not None:
+            self.last_fingerprint = persistent_fingerprint
         if fingerprint == self.last_fingerprint:
             return None
         self.last_fingerprint = fingerprint

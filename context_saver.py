@@ -115,12 +115,14 @@ class ContextSaver:
     """Build compact durable context and short-circuit unchanged saves.
 
     ``state_path`` makes duplicate detection survive separate CLI/skill
-    invocations. The small lock uses atomic file creation, so simultaneous
-    processes cannot both win the same idempotency check.
+    invocations. The lock is acquired before the fingerprint is compared and
+    claimed, giving each identical state a single winner across processes.
     """
     def __init__(self, *, last_fingerprint: str | None = None, state_path: str | os.PathLike[str] | None = None, lock_timeout: float = 5.0) -> None:
+        if lock_timeout <= 0:
+            raise ValueError("lock_timeout must be positive")
         self.state_path = Path(state_path).expanduser() if state_path else None
-        self.lock_timeout = max(0.1, float(lock_timeout))
+        self.lock_timeout = float(lock_timeout)
         self.last_fingerprint = last_fingerprint if last_fingerprint is not None else self._load_fingerprint()
         self.last_snapshot: ContextSnapshot | None = None
 
@@ -196,7 +198,8 @@ class ContextSaver:
         fingerprint = snapshot.fingerprint()
         fd = self._acquire_lock()
         try:
-            changed = fingerprint != self._load_fingerprint() if self.state_path else fingerprint != self.last_fingerprint
+            previous = self._load_fingerprint() if self.state_path else self.last_fingerprint
+            changed = fingerprint != previous
             self.last_fingerprint = fingerprint
             self._persist_fingerprint(fingerprint)
             self.last_snapshot = snapshot
@@ -209,10 +212,9 @@ class ContextSaver:
         fingerprint = snapshot.fingerprint()
         fd = self._acquire_lock()
         try:
-            persistent_fingerprint = self._load_fingerprint()
-            if persistent_fingerprint is not None:
-                self.last_fingerprint = persistent_fingerprint
-            if fingerprint == self.last_fingerprint:
+            previous = self._load_fingerprint() if self.state_path else self.last_fingerprint
+            self.last_fingerprint = previous
+            if fingerprint == previous:
                 return None
             self.last_fingerprint = fingerprint
             self._persist_fingerprint(fingerprint)

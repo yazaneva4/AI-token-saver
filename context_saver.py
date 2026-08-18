@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 from typing import Iterable, Mapping
 
 PRESERVED_FIELDS = ("project", "current_task", "decisions", "bugs", "fixes", "files", "commands", "tests", "services", "next_steps")
@@ -113,15 +114,19 @@ class ContextSaveResult:
 class ContextSaver:
     """Build compact durable context and short-circuit unchanged saves.
 
-    ``state_path`` makes the duplicate fingerprint survive separate CLI/skill
-    invocations. This is important for providers whose skill process is
-    recreated for every message; in-memory ``last_fingerprint`` alone cannot
-    protect against repeated work across those invocations.
+    ``state_path`` makes duplicate detection survive separate CLI/skill
+    invocations. The small lock uses atomic file creation, so simultaneous
+    processes cannot both win the same idempotency check.
     """
-    def __init__(self, *, last_fingerprint: str | None = None, state_path: str | os.PathLike[str] | None = None) -> None:
+    def __init__(self, *, last_fingerprint: str | None = None, state_path: str | os.PathLike[str] | None = None, lock_timeout: float = 5.0) -> None:
         self.state_path = Path(state_path).expanduser() if state_path else None
+        self.lock_timeout = max(0.1, float(lock_timeout))
         self.last_fingerprint = last_fingerprint if last_fingerprint is not None else self._load_fingerprint()
         self.last_snapshot: ContextSnapshot | None = None
+
+    @property
+    def _lock_path(self) -> Path | None:
+        return self.state_path.with_suffix(self.state_path.suffix + ".lock") if self.state_path else None
 
     def _load_fingerprint(self) -> str | None:
         if self.state_path is None or not self.state_path.is_file():
@@ -141,6 +146,36 @@ class ContextSaver:
         temporary.write_text(json.dumps({"fingerprint": fingerprint}, separators=(",", ":")), encoding="utf-8")
         temporary.replace(self.state_path)
 
+    def _acquire_lock(self) -> int | None:
+        lock_path = self._lock_path
+        if lock_path is None:
+            return None
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + self.lock_timeout
+        while True:
+            try:
+                return os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    if time.time() - lock_path.stat().st_mtime > self.lock_timeout * 2:
+                        lock_path.unlink(missing_ok=True)
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"timed out waiting for context lock: {lock_path}")
+                time.sleep(0.01)
+
+    def _release_lock(self, fd: int | None) -> None:
+        lock_path = self._lock_path
+        if fd is not None:
+            os.close(fd)
+        if lock_path is not None:
+            try:
+                lock_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
     def build(self, state: Mapping[str, object]) -> ContextSnapshot:
         if not isinstance(state, Mapping):
             raise TypeError("state must be a mapping")
@@ -159,30 +194,40 @@ class ContextSaver:
     def save(self, state: Mapping[str, object]) -> ContextSaveResult:
         snapshot = self.build(state)
         fingerprint = snapshot.fingerprint()
-        changed = fingerprint != self.last_fingerprint
-        self.last_fingerprint = fingerprint
-        self._persist_fingerprint(fingerprint)
-        self.last_snapshot = snapshot
-        return ContextSaveResult(snapshot, fingerprint, changed, snapshot.to_text())
+        fd = self._acquire_lock()
+        try:
+            changed = fingerprint != self._load_fingerprint() if self.state_path else fingerprint != self.last_fingerprint
+            self.last_fingerprint = fingerprint
+            self._persist_fingerprint(fingerprint)
+            self.last_snapshot = snapshot
+            return ContextSaveResult(snapshot, fingerprint, changed, snapshot.to_text())
+        finally:
+            self._release_lock(fd)
 
     def save_if_changed(self, state: Mapping[str, object]) -> ContextSaveResult | None:
         snapshot = self.build(state)
         fingerprint = snapshot.fingerprint()
-        # Re-read durable state on every idempotency check so a long-lived saver
-        # cannot keep a stale fingerprint after another process has updated it.
-        persistent_fingerprint = self._load_fingerprint()
-        if persistent_fingerprint is not None:
-            self.last_fingerprint = persistent_fingerprint
-        if fingerprint == self.last_fingerprint:
-            return None
-        self.last_fingerprint = fingerprint
-        self._persist_fingerprint(fingerprint)
-        self.last_snapshot = snapshot
-        return ContextSaveResult(snapshot, fingerprint, True, snapshot.to_text())
+        fd = self._acquire_lock()
+        try:
+            persistent_fingerprint = self._load_fingerprint()
+            if persistent_fingerprint is not None:
+                self.last_fingerprint = persistent_fingerprint
+            if fingerprint == self.last_fingerprint:
+                return None
+            self.last_fingerprint = fingerprint
+            self._persist_fingerprint(fingerprint)
+            self.last_snapshot = snapshot
+            return ContextSaveResult(snapshot, fingerprint, True, snapshot.to_text())
+        finally:
+            self._release_lock(fd)
 
     def reset(self) -> None:
-        self.last_fingerprint = None
-        self.last_snapshot = None
-        if self.state_path:
-            try: self.state_path.unlink(missing_ok=True)
-            except OSError: pass
+        fd = self._acquire_lock()
+        try:
+            self.last_fingerprint = None
+            self.last_snapshot = None
+            if self.state_path:
+                try: self.state_path.unlink(missing_ok=True)
+                except OSError: pass
+        finally:
+            self._release_lock(fd)

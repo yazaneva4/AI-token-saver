@@ -22,10 +22,45 @@ def test_repeated_input_can_be_detected_without_reprocessing_state():
     assert saver.is_same_input(text)
 
 
+def test_repeated_process_marks_second_run_unchanged():
+    text = "same state\n"
+    saver = RealtimeUsageSaver(redact_secrets=False)
+    first = "".join(saver.process([text]))
+    assert first == text
+    assert saver.result is not None and saver.result.changed is True
+
+    second = "".join(saver.process([text]))
+    assert second == text
+    assert saver.result is not None and saver.result.changed is False
+    assert saver.is_same_input(text)
+
+
 def test_changed_input_changes_fingerprint():
     saver = RealtimeUsageSaver(redact_secrets=False)
     list(saver.process(["one\n"]))
     assert not saver.is_same_input("two\n")
+
+
+def test_feed_after_finish_requires_explicit_restart():
+    saver = RealtimeUsageSaver(redact_secrets=False)
+    list(saver.process(["done\n"]))
+    try:
+        saver.feed("more\n")
+    except RuntimeError as exc:
+        assert "start()" in str(exc)
+    else:
+        raise AssertionError("feed() should reject a finished stream")
+
+
+def test_finish_after_finish_requires_explicit_restart():
+    saver = RealtimeUsageSaver(redact_secrets=False)
+    list(saver.process(["done\n"]))
+    try:
+        saver.finish()
+    except RuntimeError as exc:
+        assert "start()" in str(exc)
+    else:
+        raise AssertionError("finish() should reject a finished stream")
 
 
 def test_tiny_chunks_do_not_drop_characters():

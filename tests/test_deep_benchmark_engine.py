@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from ai_token_saver import Memory, RealtimeCompactor, compact_stream, compact_text_with_metrics, merge_memory
+from ai_token_saver import Memory, RealtimeCompactor, compact_stream, compact_text, compact_text_with_metrics, merge_memory
 from benchmarks.benchmark_runner import run_benchmarks
 
 
@@ -24,6 +24,14 @@ def test_all_quick_benchmarks_pass():
     results = run_benchmarks()
     assert results
     assert all(result.passed for result in results), [result.name for result in results if not result.passed]
+
+
+def test_compaction_is_idempotent_for_repeated_saver_invocations():
+    source = "PROJECT: demo\n\nSTATE:\n- GitHub synced\n- Vercel deployed\n- GitHub synced\n"
+    first = compact_text(source, redact_secrets=False)
+    second = compact_text(first, redact_secrets=False)
+    third = compact_text(second, redact_secrets=False)
+    assert first == second == third
 
 
 @pytest.mark.parametrize("repetitions", [10, 100, 1_000])

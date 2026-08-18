@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from context_saver import ContextSaver
 
 
@@ -94,3 +95,17 @@ def test_persistent_state_is_atomic_and_reset_removes_it(tmp_path):
     path = tmp_path / "nested" / "context-state.json"; saver = ContextSaver(state_path=path); saver.save(sample_state())
     assert path.is_file() and not path.with_suffix(".json.tmp").exists()
     saver.reset(); assert not path.exists()
+
+
+def test_concurrent_identical_saves_only_one_process_wins(tmp_path):
+    path = tmp_path / "concurrent.json"
+
+    def attempt():
+        return ContextSaver(state_path=path, lock_timeout=2).save_if_changed(sample_state())
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: attempt(), range(8)))
+
+    assert sum(result is not None for result in results) == 1
+    assert path.is_file()
+    assert not path.with_suffix(".json.lock").exists()

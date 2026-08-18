@@ -1,0 +1,76 @@
+from context_saver import ContextSaver
+
+
+def sample_state():
+    return {
+        "project": "AI Token Saver",
+        "current_task": "Build the real context saver",
+        "decisions": ["Preserve technical state", "Preserve technical state"],
+        "bugs": ["Second identical save can be expensive"],
+        "fixes": ["Add deterministic fingerprinting"],
+        "files": ["context_saver.py", "SKILL.md", "context_saver.py"],
+        "commands": ["git pull origin main"],
+        "tests": ["deep benchmark passed"],
+        "services": [
+            {"name": "github", "values": {"status": "passing"}},
+            {"name": "vercel", "values": {"status": "deployed"}},
+            {"name": "supabase", "values": {"status": "connected"}},
+            {"name": "gmail", "values": {"status": "waiting"}},
+            {"name": "browser", "values": {"status": "researching"}},
+        ],
+        "next_steps": ["Run the deep context test", "Run the deep context test"],
+    }
+
+
+def test_context_saver_preserves_high_value_state_and_deduplicates():
+    result = ContextSaver().save(sample_state())
+    snapshot = result.snapshot
+    assert snapshot.project == "AI Token Saver"
+    assert snapshot.current_task == "Build the real context saver"
+    assert snapshot.decisions == ("Preserve technical state", "")[:1]
+    assert snapshot.files == ("context_saver.py", "SKILL.md")
+    assert len(snapshot.services) == 5
+    assert "BUGS:" in result.text
+    assert "NEXT STEPS:" in result.text
+
+
+def test_context_saver_is_idempotent_for_identical_state():
+    saver = ContextSaver()
+    first = saver.save(sample_state())
+    second = saver.save(sample_state())
+    assert first.changed is True
+    assert second.changed is False
+    assert first.fingerprint == second.fingerprint
+    assert first.text == second.text
+
+
+def test_save_if_changed_returns_none_for_duplicate_state():
+    saver = ContextSaver()
+    saver.save(sample_state())
+    assert saver.save_if_changed(sample_state()) is None
+
+
+def test_changed_state_gets_a_new_fingerprint():
+    saver = ContextSaver()
+    first = saver.save(sample_state())
+    changed = sample_state()
+    changed["next_steps"] = ["Run CI"]
+    second = saver.save(changed)
+    assert second.changed is True
+    assert second.fingerprint != first.fingerprint
+
+
+def test_normalization_is_order_independent_for_services():
+    state = sample_state()
+    a = ContextSaver().save(state)
+    state["services"] = list(reversed(state["services"]))
+    b = ContextSaver().save(state)
+    assert a.fingerprint == b.fingerprint
+
+
+def test_reset_allows_same_state_to_be_saved_again():
+    saver = ContextSaver()
+    saver.save(sample_state())
+    saver.reset()
+    result = saver.save(sample_state())
+    assert result.changed is True

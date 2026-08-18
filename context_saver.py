@@ -4,14 +4,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 from typing import Iterable, Mapping
 
 
 PRESERVED_FIELDS = ("project", "current_task", "decisions", "bugs", "fixes", "files", "commands", "tests", "services", "next_steps")
 
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)(\bapi[-_]key\b\s*[:=]\s*)([^\s,;]+)"),
+    re.compile(r"(?i)(\b(?:access[-_]?token|auth[-_]?token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"),
+    re.compile(r"(?i)(\bbearer\s+)([A-Za-z0-9._~+/=-]{16,})"),
+)
+
+
+def _redact(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub(r"\1[REDACTED]", text)
+    return text
+
 
 def _clean(value: object) -> str:
-    return str(value).strip()
+    return _redact(value)
 
 
 def _dedupe(values: Iterable[object]) -> tuple[str, ...]:

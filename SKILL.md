@@ -311,6 +311,65 @@ not turn a benchmark result into a universal savings promise. The benchmark
 runner must fail when a required behavior does not pass, and CI runs the smoke
 suite after the normal pytest suite.
 
+## Real Context Saver
+
+The repository also includes `context_saver.py`, a deterministic context-state
+layer that sits above token compaction. It is designed to reduce **what must be
+carried between turns**, not merely remove duplicate lines.
+
+The context saver preserves these high-value fields when supplied by the host:
+
+- `project`
+- `current_task`
+- `decisions`
+- `bugs`
+- `fixes`
+- `files`
+- `commands`
+- `tests`
+- `services`
+- `next_steps`
+
+It produces a `ContextSnapshot` with a stable SHA-256 fingerprint and a compact
+text representation. Repeated entries in structured fields are deduplicated,
+service entries are normalized deterministically, and ordering differences in
+service state do not change the fingerprint.
+
+### Context Saver idempotency
+
+`ContextSaver.save(state)` reports whether the normalized context changed.
+`ContextSaver.save_if_changed(state)` returns no result when the normalized
+context is unchanged. Hosts should prefer `save_if_changed` when a second save
+must be a cheap no-op.
+
+The context saver MUST NOT infer facts that are not supplied by the host. It is a
+structured state compressor, not a semantic model that can safely invent missing
+project information.
+
+### Daily multi-service context
+
+When a host supplies service state, the saver can compact status for daily work
+across:
+
+- GitHub — repository, branch, PR/issue, CI, and code state
+- Vercel — deployment and project state
+- Supabase — database/auth/backend state
+- Gmail — relevant communication status
+- Browser — current research/task state
+
+Only include service state that the host actually supplies. Do not claim live
+access to any service merely because its name appears in a snapshot.
+
+### Context Saver safety
+
+Do not place credentials, passwords, private keys, or raw access tokens into the
+structured context state. Hosts that need credential storage must use secure
+secret storage separately from the context saver.
+
+Do not use the context saver to rewrite executable source code, commands, paths,
+identifiers, versions, or exact error text. Those belong in protected technical
+state.
+
 ## Safe Token Optimization
 
 When saving context:

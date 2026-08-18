@@ -162,6 +162,23 @@ If an identical saver command is repeated with unchanged source state, do not re
 
 Use the smallest possible acknowledgement for an unchanged state.
 
+## Usage Saver Implementation
+
+The repository includes `usage_saver.py` as a provider-agnostic implementation of the daily usage-saver layer.
+
+It provides:
+
+- `UsageCheckpoint` for resumable compact project state;
+- `ServiceState` for GitHub, Vercel, Supabase, Gmail, and browser state;
+- `state_fingerprint()` for deterministic SHA-256 state identity;
+- `IdempotentUsageSaver` to avoid repeating expensive work for unchanged state;
+- `normalize_saver_commands()` to collapse `/ai-token-saver` and `/ai-usage-saver` into one operation;
+- `compact_checkpoint()` for deterministic normalization and exact-line deduplication of structured checkpoint facts.
+
+This implementation does not bypass provider quotas, usage limits, billing controls, or safety restrictions. It only prevents redundant local work and keeps resumable state compact.
+
+For cross-process idempotency, the host should persist the latest fingerprint and result outside the conversation. A process-local `IdempotentUsageSaver` cannot by itself remember state after the process exits.
+
 ## Bug Attack Protocol
 
 A bug report is a hypothesis until verified.
@@ -220,6 +237,8 @@ Exercise the relevant service boundary when available.
 ### Deep benchmark
 
 Run the repository's benchmark suite for large contexts, streaming, technical-content preservation, redaction, token counting, memory consolidation, and repeated-compaction stability.
+
+The `tests/test_usage_saver.py` suite specifically verifies alias collapsing, unchanged-state idempotency, changed-state reruns, checkpoint normalization, stable fingerprints, and reset behavior.
 
 ## Usage Safety
 

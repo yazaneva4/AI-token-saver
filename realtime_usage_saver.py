@@ -52,7 +52,7 @@ class RealtimeUsageSaver:
         self.aggressive = aggressive
         self.last_fingerprint = last_fingerprint
         self._compactor: RealtimeCompactor | None = None
-        self._current_fingerprint: str | None = None
+        self.last_result: RealtimeUsageResult | None = None
 
     def start(self) -> None:
         self._compactor = RealtimeCompactor(
@@ -60,7 +60,7 @@ class RealtimeUsageSaver:
             redaction_mode=self.redaction_mode,
             aggressive=self.aggressive,
         )
-        self._current_fingerprint = None
+        self.last_result = None
 
     def feed(self, chunk: str) -> str:
         if self._compactor is None:
@@ -70,34 +70,35 @@ class RealtimeUsageSaver:
             raise TypeError("chunk must be a string")
         return self._compactor.feed(chunk)
 
-    def finish(self) -> RealtimeUsageResult:
+    def finish(self) -> tuple[str, RealtimeUsageResult]:
+        """Flush the final buffered output and return it with the final result."""
         if self._compactor is None:
             self.start()
         assert self._compactor is not None
-        self._compactor.finish()
+        final_output = self._compactor.finish()
         original = self._compactor.original
         mode = self._compactor.redaction_mode
         fingerprint = state_fingerprint(original, redaction_mode=mode, aggressive=self.aggressive)
         changed = fingerprint != self.last_fingerprint
         self.last_fingerprint = fingerprint
-        return RealtimeUsageResult(fingerprint, self._compactor.result(), changed)
+        result = RealtimeUsageResult(fingerprint, self._compactor.result(), changed)
+        self.last_result = result
+        return final_output, result
 
     def process(self, chunks: Iterable[str]) -> Iterator[str]:
-        """Yield realtime output for a single stream, then finalize the state."""
+        """Yield realtime output for a single stream, including final buffered data."""
         self.start()
         for chunk in chunks:
             emitted = self.feed(chunk)
             if emitted:
                 yield emitted
-        final = self.finish()
-        # ``finish`` returns no data here because the compactor was finalized above;
-        # callers receive all emitted data through ``feed``. The final result is
-        # available as ``self.last_result`` after ``finish``.
-        self.last_result = final
+        final_output, _ = self.finish()
+        if final_output:
+            yield final_output
 
     @property
     def result(self) -> RealtimeUsageResult | None:
-        return getattr(self, "last_result", None)
+        return self.last_result
 
     def is_same_input(self, text: str) -> bool:
         mode = self.redaction_mode or ("common" if self.redact_secrets else "off")

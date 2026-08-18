@@ -109,3 +109,13 @@ def test_concurrent_identical_saves_only_one_process_wins(tmp_path):
     assert sum(result is not None for result in results) == 1
     assert path.is_file()
     assert not path.with_suffix(".json.lock").exists()
+
+
+def test_lock_timeout_must_be_positive(tmp_path):
+    path = tmp_path / "context.json"
+    try:
+        ContextSaver(state_path=path, lock_timeout=0)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError")

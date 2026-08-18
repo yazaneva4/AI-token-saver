@@ -33,11 +33,7 @@ def state_fingerprint(text: str, *, redaction_mode: RedactionMode = "common", ag
 
 
 class RealtimeUsageSaver:
-    """Incremental usage saver with an optional persisted last fingerprint.
-
-    The class itself does not perform I/O. A host can persist ``last_fingerprint``
-    in a JSON/state file, database, or other durable store between invocations.
-    """
+    """Incremental usage saver with an optional persisted last fingerprint."""
 
     def __init__(
         self,
@@ -52,19 +48,25 @@ class RealtimeUsageSaver:
         self.aggressive = aggressive
         self.last_fingerprint = last_fingerprint
         self._compactor: RealtimeCompactor | None = None
+        self._finished = False
         self.last_result: RealtimeUsageResult | None = None
 
     def start(self) -> None:
+        """Start a new stream without discarding the persisted fingerprint."""
         self._compactor = RealtimeCompactor(
             redact_secrets=self.redact_secrets,
             redaction_mode=self.redaction_mode,
             aggressive=self.aggressive,
         )
+        self._finished = False
         self.last_result = None
 
     def feed(self, chunk: str) -> str:
+        """Feed one chunk and return any output safe to emit immediately."""
         if self._compactor is None:
             self.start()
+        if self._finished:
+            raise RuntimeError("stream is already finished; call start() before feeding more data")
         assert self._compactor is not None
         if not isinstance(chunk, str):
             raise TypeError("chunk must be a string")
@@ -74,6 +76,8 @@ class RealtimeUsageSaver:
         """Flush the final buffered output and return it with the final result."""
         if self._compactor is None:
             self.start()
+        if self._finished:
+            raise RuntimeError("stream is already finished; call start() before finishing again")
         assert self._compactor is not None
         final_output = self._compactor.finish()
         original = self._compactor.original
@@ -83,6 +87,7 @@ class RealtimeUsageSaver:
         self.last_fingerprint = fingerprint
         result = RealtimeUsageResult(fingerprint, self._compactor.result(), changed)
         self.last_result = result
+        self._finished = True
         return final_output, result
 
     def process(self, chunks: Iterable[str]) -> Iterator[str]:

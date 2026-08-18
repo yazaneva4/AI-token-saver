@@ -35,6 +35,10 @@ information merely to reach a percentage.
    history when needed.
 9. Never store credentials or secrets in ordinary memory by default.
 10. Do not save temporary chatter unless explicitly requested.
+11. Repeating an identical saver command must be idempotent: once the current
+    context is already compacted and saved, another identical command should
+    perform little or no additional work and must not recursively process its own
+    generated output.
 
 ## Safe Compaction
 
@@ -71,6 +75,50 @@ When managing structured persistent memory:
 - Never apply semantic consolidation to executable code, commands, paths,
   configuration, identifiers, or other exact technical content unless explicitly
   requested.
+
+## Repeated Command / Idempotency Guard
+
+Commands such as `/ai-token-saver`, `/ai-usage-saver`, `/save`, and `/save-all`
+may be invoked repeatedly during a long session.
+
+The skill MUST treat an identical repeated invocation against unchanged context
+as an idempotent operation.
+
+### Required behavior
+
+1. Determine whether the relevant context has changed since the previous saver
+   operation.
+2. If nothing material changed, do not rebuild or rewrite the entire saved state.
+3. Do not feed the skill's own generated summary, confirmation message, or
+   compacted memory back into the same save operation as if it were new source
+   material.
+4. Do not recursively compact the output of the previous compaction operation.
+5. Do not repeatedly append the same status, summary, benchmark, or confirmation.
+6. Do not repeatedly call the same external service merely because the saver
+   command was repeated.
+7. If the host exposes a stable fingerprint/version for the saved state, use it
+   to detect unchanged input.
+8. If the host does not expose a fingerprint, compare the normalized relevant
+   source state before doing expensive work.
+9. When unchanged, return a minimal acknowledgement rather than regenerating the
+   complete memory.
+10. When material changes exist, compact only the changed/new information and
+    merge it into the existing canonical state.
+
+### Idempotency invariant
+
+For unchanged input:
+
+`save(save(X)) == save(X)`
+
+and the second invocation must not cause unbounded context growth, recursive
+processing, or repeated external tool calls.
+
+The exact user-facing acknowledgement may be short, for example:
+
+`Already compact and up to date.`
+
+Do not dump the full saved state merely because the command was repeated.
 
 ## Secret and Credential Storage
 
@@ -251,7 +299,8 @@ The deep benchmark suite covers:
 - preservation of executable and structured technical content;
 - default/common/strict secret-redaction behavior using only fake test values;
 - supplied token-counter reporting and fallback measurement semantics;
-- structured memory fact consolidation without rewriting history.
+- structured memory fact consolidation without rewriting history;
+- repeated-compaction/idempotency stability.
 
 Use `python -m benchmarks.benchmark_runner` for the CI-safe smoke suite. Use
 `python -m benchmarks.benchmark_runner --deep` for the larger context run.
@@ -476,6 +525,13 @@ After `/save`, if the host supports the command:
 After `/save-all`, if the host supports the command:
 
 "Saved. Context deduplicated and compressed."
+
+For an unchanged repeated saver command, prefer:
+
+"Already compact and up to date."
+
+Do not regenerate or dump the complete saved state for an unchanged repeated
+command.
 
 After `/save secret`, do not echo the credential. Confirm only that the secure
 secret-store operation succeeded, or clearly state that secure storage is

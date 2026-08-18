@@ -31,12 +31,23 @@ def _provider_state_path(provider: str) -> Path:
 
 class ProviderAdapter:
     """Connect any host/provider to ContextSaver with cross-invocation deduplication."""
-    def __init__(self, provider: str, saver: ContextSaver | None = None) -> None:
+
+    def __init__(
+        self,
+        provider: str,
+        saver: ContextSaver | None = None,
+        *,
+        state_path: str | os.PathLike[str] | None = None,
+    ) -> None:
         provider = provider.strip()
         if not provider:
             raise ValueError("provider must not be empty")
+        if saver is not None and state_path is not None:
+            raise ValueError("pass either saver or state_path, not both")
         self.provider = provider
-        self.saver = saver or ContextSaver(state_path=_provider_state_path(provider))
+        self.saver = saver or ContextSaver(
+            state_path=state_path if state_path is not None else _provider_state_path(provider)
+        )
 
     def save(self, state: Mapping[str, Any]) -> ProviderSaveResult:
         return self._result(self.saver.save(state))
@@ -55,5 +66,10 @@ class ProviderAdapter:
         return ProviderSaveResult(self.provider, result.changed, result.fingerprint, result.text)
 
 
-def create_adapter(provider: str, *, saver: ContextSaver | None = None) -> ProviderAdapter:
-    return ProviderAdapter(provider, saver=saver)
+def create_adapter(
+    provider: str,
+    *,
+    saver: ContextSaver | None = None,
+    state_path: str | os.PathLike[str] | None = None,
+) -> ProviderAdapter:
+    return ProviderAdapter(provider, saver=saver, state_path=state_path)

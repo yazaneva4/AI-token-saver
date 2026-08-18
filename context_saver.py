@@ -48,6 +48,7 @@ def _normalize_services(value: object) -> tuple[dict[str, object], ...]:
         if key not in seen:
             seen.add(key)
             result.append(normalized)
+    result.sort(key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return tuple(result)
 
 

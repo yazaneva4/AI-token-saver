@@ -4,12 +4,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import os
+from pathlib import Path
 import re
 from typing import Iterable, Mapping
 
-
 PRESERVED_FIELDS = ("project", "current_task", "decisions", "bugs", "fixes", "files", "commands", "tests", "services", "next_steps")
-
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(\bapi[-_]key\b\s*[:=]\s*)([^\s,;]+)"),
     re.compile(r"(?i)(\b(?:access[-_]?token|auth[-_]?token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"),
@@ -54,11 +54,7 @@ def _normalize_services(value: object) -> tuple[dict[str, object], ...]:
         raw_values = item.get("values", {})
         if not name or not isinstance(raw_values, Mapping):
             continue
-        values = {
-            _clean(key): _clean(val)
-            for key, val in sorted(raw_values.items(), key=lambda pair: str(pair[0]))
-            if _clean(val)
-        }
+        values = {_clean(key): _clean(val) for key, val in sorted(raw_values.items(), key=lambda pair: str(pair[0])) if _clean(val)}
         normalized = {"name": name, "values": values}
         key = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         if key not in seen:
@@ -70,7 +66,6 @@ def _normalize_services(value: object) -> tuple[dict[str, object], ...]:
 
 @dataclass(frozen=True)
 class ContextSnapshot:
-    """Deterministic, compact state suitable for persistence between turns."""
     project: str = ""
     current_task: str = ""
     decisions: tuple[str, ...] = ()
@@ -83,18 +78,7 @@ class ContextSnapshot:
     next_steps: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
-        return {
-            "project": self.project,
-            "current_task": self.current_task,
-            "decisions": list(self.decisions),
-            "bugs": list(self.bugs),
-            "fixes": list(self.fixes),
-            "files": list(self.files),
-            "commands": list(self.commands),
-            "tests": list(self.tests),
-            "services": [dict(item) for item in self.services],
-            "next_steps": list(self.next_steps),
-        }
+        return {"project": self.project, "current_task": self.current_task, "decisions": list(self.decisions), "bugs": list(self.bugs), "fixes": list(self.fixes), "files": list(self.files), "commands": list(self.commands), "tests": list(self.tests), "services": [dict(item) for item in self.services], "next_steps": list(self.next_steps)}
 
     def fingerprint(self) -> str:
         payload = json.dumps(self.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -105,11 +89,7 @@ class ContextSnapshot:
         for title, value in (("PROJECT", self.project), ("CURRENT TASK", self.current_task)):
             if value:
                 sections.append(f"{title}:\n{value}")
-        for title, values in (
-            ("DECISIONS", self.decisions), ("BUGS", self.bugs), ("FIXES", self.fixes),
-            ("FILES", self.files), ("COMMANDS", self.commands), ("TESTS", self.tests),
-            ("NEXT STEPS", self.next_steps),
-        ):
+        for title, values in (("DECISIONS", self.decisions), ("BUGS", self.bugs), ("FIXES", self.fixes), ("FILES", self.files), ("COMMANDS", self.commands), ("TESTS", self.tests), ("NEXT STEPS", self.next_steps)):
             if values:
                 sections.append(title + ":\n" + "\n".join(f"- {value}" for value in values))
         if self.services:
@@ -131,33 +111,48 @@ class ContextSaveResult:
 
 
 class ContextSaver:
-    """Build compact durable context and short-circuit unchanged saves."""
-    def __init__(self, *, last_fingerprint: str | None = None) -> None:
-        self.last_fingerprint = last_fingerprint
+    """Build compact durable context and short-circuit unchanged saves.
+
+    ``state_path`` makes the duplicate fingerprint survive separate CLI/skill
+    invocations. This is important for providers whose skill process is
+    recreated for every message; in-memory ``last_fingerprint`` alone cannot
+    protect against repeated work across those invocations.
+    """
+    def __init__(self, *, last_fingerprint: str | None = None, state_path: str | os.PathLike[str] | None = None) -> None:
+        self.state_path = Path(state_path).expanduser() if state_path else None
+        self.last_fingerprint = last_fingerprint if last_fingerprint is not None else self._load_fingerprint()
         self.last_snapshot: ContextSnapshot | None = None
+
+    def _load_fingerprint(self) -> str | None:
+        if self.state_path is None or not self.state_path.is_file():
+            return None
+        try:
+            data = json.loads(self.state_path.read_text(encoding="utf-8"))
+            value = data.get("fingerprint") if isinstance(data, dict) else None
+            return value if isinstance(value, str) and value else None
+        except (OSError, ValueError, TypeError):
+            return None
+
+    def _persist_fingerprint(self, fingerprint: str) -> None:
+        if self.state_path is None:
+            return
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
+        temporary.write_text(json.dumps({"fingerprint": fingerprint}, separators=(",", ":")), encoding="utf-8")
+        temporary.replace(self.state_path)
 
     def build(self, state: Mapping[str, object]) -> ContextSnapshot:
         if not isinstance(state, Mapping):
             raise TypeError("state must be a mapping")
-
         def values(name: str) -> tuple[str, ...]:
             raw = state.get(name, ())
-            if isinstance(raw, str):
-                raw = (raw,)
-            if not isinstance(raw, (list, tuple, set, frozenset)):
-                return ()
+            if isinstance(raw, str): raw = (raw,)
+            if not isinstance(raw, (list, tuple, set, frozenset)): return ()
             return _dedupe(raw)
-
         return ContextSnapshot(
-            project=_clean(state.get("project", "")),
-            current_task=_clean(state.get("current_task", "")),
-            decisions=values("decisions"),
-            bugs=values("bugs"),
-            fixes=values("fixes"),
-            files=values("files"),
-            commands=values("commands"),
-            tests=values("tests"),
-            services=_normalize_services(state.get("services", ())),
+            project=_clean(state.get("project", "")), current_task=_clean(state.get("current_task", "")),
+            decisions=values("decisions"), bugs=values("bugs"), fixes=values("fixes"), files=values("files"),
+            commands=values("commands"), tests=values("tests"), services=_normalize_services(state.get("services", ())),
             next_steps=values("next_steps"),
         )
 
@@ -166,6 +161,7 @@ class ContextSaver:
         fingerprint = snapshot.fingerprint()
         changed = fingerprint != self.last_fingerprint
         self.last_fingerprint = fingerprint
+        self._persist_fingerprint(fingerprint)
         self.last_snapshot = snapshot
         return ContextSaveResult(snapshot, fingerprint, changed, snapshot.to_text())
 
@@ -175,9 +171,13 @@ class ContextSaver:
         if fingerprint == self.last_fingerprint:
             return None
         self.last_fingerprint = fingerprint
+        self._persist_fingerprint(fingerprint)
         self.last_snapshot = snapshot
         return ContextSaveResult(snapshot, fingerprint, True, snapshot.to_text())
 
     def reset(self) -> None:
         self.last_fingerprint = None
         self.last_snapshot = None
+        if self.state_path:
+            try: self.state_path.unlink(missing_ok=True)
+            except OSError: pass

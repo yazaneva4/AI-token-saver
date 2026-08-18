@@ -82,6 +82,14 @@ def test_persistent_fingerprint_survives_new_saver_instance(tmp_path):
     assert first.changed is True and second is None
 
 
+def test_long_lived_saver_refreshes_fingerprint_from_disk(tmp_path):
+    path = tmp_path / "context-state.json"
+    first_saver = ContextSaver(state_path=path)
+    second_saver = ContextSaver(state_path=path)
+    first_saver.save(sample_state())
+    assert second_saver.save_if_changed(sample_state()) is None
+
+
 def test_persistent_state_is_atomic_and_reset_removes_it(tmp_path):
     path = tmp_path / "nested" / "context-state.json"; saver = ContextSaver(state_path=path); saver.save(sample_state())
     assert path.is_file() and not path.with_suffix(".json.tmp").exists()

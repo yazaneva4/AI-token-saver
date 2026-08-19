@@ -15,6 +15,25 @@ from typing import Any, Iterable, Mapping
 
 SAVER_ALIASES = frozenset({"/ai-token-saver", "/ai-usage-saver"})
 _SAVER_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9_-])/(?:ai-token-saver|ai-usage-saver)(?![A-Za-z0-9_-])")
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)(\bapi[-_]key\b\s*[:=]\s*)([^\s,;]+)"),
+    re.compile(r"(?i)(\b(?:access[-_]?token|auth[-_]?token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"),
+    re.compile(r"(?i)(\bbearer\s+)([A-Za-z0-9._~+/=-]{16,})"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
+    re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"),
+)
+
+
+def _redact(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    for pattern in _SECRET_PATTERNS[:3]:
+        text = pattern.sub(r"\1[REDACTED]", text)
+    text = _SECRET_PATTERNS[3].sub("[REDACTED]", text)
+    text = _SECRET_PATTERNS[4].sub("[REDACTED]", text)
+    return text
+
 
 @dataclass
 class ServiceState:
@@ -24,13 +43,14 @@ class ServiceState:
 
     def normalized(self) -> dict[str, object]:
         return {
-            "name": self.name.strip().upper(),
+            "name": _redact(self.name).upper(),
             "values": {
-                str(k): str(v).strip()
+                _redact(k): _redact(v)
                 for k, v in sorted(self.values.items(), key=lambda item: str(item[0]))
-                if str(v).strip()
+                if _redact(v)
             },
         }
+
 
 @dataclass
 class UsageCheckpoint:
@@ -50,7 +70,7 @@ class UsageCheckpoint:
             seen: set[str] = set()
             result: list[str] = []
             for value in values:
-                value = str(value).strip()
+                value = _redact(value)
                 if not value or value in seen:
                     continue
                 seen.add(value)
@@ -67,8 +87,8 @@ class UsageCheckpoint:
                 services.append(normalized)
         services.sort(key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return {
-            "project": str(self.project).strip(),
-            "current_task": str(self.current_task).strip(),
+            "project": _redact(self.project),
+            "current_task": _redact(self.current_task),
             "completed": clean(self.completed),
             "in_progress": clean(self.in_progress),
             "blocked": clean(self.blocked),
@@ -78,11 +98,13 @@ class UsageCheckpoint:
             "next_steps": clean(self.next_steps),
         }
 
+
 def normalize_saver_commands(message: str) -> tuple[str, ...]:
     """Return saver aliases found as complete command tokens, collapsed to one canonical command."""
     if not isinstance(message, str):
         raise TypeError("message must be a string")
     return ("/ai-token-saver",) if _SAVER_COMMAND_RE.search(message) else ()
+
 
 def state_fingerprint(state: Mapping[str, object] | UsageCheckpoint | str) -> str:
     """Create a stable SHA-256 fingerprint for idempotency checks."""
@@ -91,28 +113,32 @@ def state_fingerprint(state: Mapping[str, object] | UsageCheckpoint | str) -> st
     elif isinstance(state, Mapping):
         payload = _normalize_mapping(state)
     elif isinstance(state, str):
-        payload = state
+        payload = _redact(state)
     else:
         raise TypeError("state must be a mapping, UsageCheckpoint, or string")
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
+
 def _normalize_scalar(value: Any) -> object:
     if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    return str(value).strip()
+        return _redact(value) if isinstance(value, str) else value
+    return _redact(value)
+
 
 def _normalize_mapping(value: Mapping[str, object]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key in sorted(value, key=str):
         item = value[key]
+        safe_key = _redact(key)
         if isinstance(item, Mapping):
-            result[str(key)] = _normalize_mapping(item)
+            result[safe_key] = _normalize_mapping(item)
         elif isinstance(item, (list, tuple)):
-            result[str(key)] = [_normalize_mapping(x) if isinstance(x, Mapping) else _normalize_scalar(x) for x in item]
+            result[safe_key] = [_normalize_mapping(x) if isinstance(x, Mapping) else _normalize_scalar(x) for x in item]
         else:
-            result[str(key)] = _normalize_scalar(item)
+            result[safe_key] = _normalize_scalar(item)
     return result
+
 
 class IdempotentUsageSaver:
     """Guard expensive save/compact work against unchanged repeated input."""
@@ -139,6 +165,7 @@ class IdempotentUsageSaver:
     def reset(self) -> None:
         self._last_fingerprint = None
         self._last_result = None
+
 
 def compact_checkpoint(checkpoint: UsageCheckpoint) -> UsageCheckpoint:
     """Return a normalized checkpoint without destroying useful technical state."""

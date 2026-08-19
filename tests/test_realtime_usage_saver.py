@@ -68,3 +68,39 @@ def test_tiny_chunks_do_not_drop_characters():
     saver = RealtimeUsageSaver(redact_secrets=False)
     output = "".join(saver.process(text[i : i + 1] for i in range(len(text))))
     assert output == text
+
+
+def test_persistent_state_survives_new_instance(tmp_path):
+    path = tmp_path / "fingerprint.json"
+    text = "persist me\n"
+    first = RealtimeUsageSaver(redact_secrets=False, state_path=path)
+    list(first.process([text]))
+    second = RealtimeUsageSaver(redact_secrets=False, state_path=path)
+    assert second.is_same_input(text)
+
+
+def test_unchanged_run_does_not_rewrite_persistent_state(tmp_path):
+    path = tmp_path / "fingerprint.json"
+    text = "same\n"
+    first = RealtimeUsageSaver(redact_secrets=False, state_path=path)
+    list(first.process([text]))
+    before = path.read_text(encoding="utf-8")
+    second = RealtimeUsageSaver(redact_secrets=False, state_path=path)
+    list(second.process([text]))
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_lock_is_removed_after_success(tmp_path):
+    path = tmp_path / "fingerprint.json"
+    saver = RealtimeUsageSaver(redact_secrets=False, state_path=path)
+    list(saver.process(["done\n"]))
+    assert not path.with_suffix(path.suffix + ".lock").exists()
+
+
+def test_invalid_lock_timeout_is_rejected():
+    try:
+        RealtimeUsageSaver(lock_timeout=0)
+    except ValueError as exc:
+        assert "lock_timeout" in str(exc)
+    else:
+        raise AssertionError("non-positive lock timeout must be rejected")

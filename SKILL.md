@@ -114,15 +114,22 @@ The in-memory fingerprint is not sufficient when a host creates a fresh process
 for every command. Hosts MUST use the provider adapter's persistent `ContextSaver`
 state for command-level idempotency whenever the adapter is available.
 
-The Python provider adapter uses a provider-scoped state file by default:
+The Python provider adapter uses a provider-scoped state file by default. The
+filename is a readable sanitized provider slug plus a short SHA-256 suffix so
+provider names that sanitize to the same filename cannot collide:
 
-`~/.ai-token-saver/providers/<provider>.json`
+`~/.ai-token-saver/providers/<sanitized-provider>-<12-char-sha256>.json`
 
 The root can be overridden with `AI_TOKEN_SAVER_STATE_DIR`.
 
 Provider names are sanitized before becoming filenames. Never put credentials,
 conversation contents, or raw prompts into the fingerprint state file; it should
 contain only the minimum metadata needed to detect unchanged state.
+
+The persistent lock records only a process id and random lock token. A live owner
+is never considered stale merely because the operation is taking longer than the
+normal timeout. A crashed owner can be recovered safely; lock release also checks
+the token so one process cannot accidentally delete another process's lock.
 
 ### Fast-path invariant
 

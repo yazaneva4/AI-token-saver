@@ -1,3 +1,6 @@
+import json
+
+import realtime_usage_saver
 from realtime_usage_saver import RealtimeUsageSaver, state_fingerprint
 
 
@@ -104,3 +107,36 @@ def test_invalid_lock_timeout_is_rejected():
         assert "lock_timeout" in str(exc)
     else:
         raise AssertionError("non-positive lock timeout must be rejected")
+
+
+def test_lock_write_failure_cleans_up_lock_file(tmp_path, monkeypatch):
+    path = tmp_path / "fingerprint.json"
+    saver = RealtimeUsageSaver(redact_secrets=False, state_path=path)
+    real_write = realtime_usage_saver.os.write
+
+    def fail_write(fd, data):
+        raise OSError("simulated lock write failure")
+
+    monkeypatch.setattr(realtime_usage_saver.os, "write", fail_write)
+    try:
+        saver._acquire_lock()
+    except OSError as exc:
+        assert "simulated" in str(exc)
+    else:
+        raise AssertionError("lock acquisition should fail when the lock write fails")
+    finally:
+        monkeypatch.setattr(realtime_usage_saver.os, "write", real_write)
+
+    assert not path.with_suffix(path.suffix + ".lock").exists()
+
+
+def test_permission_denied_pid_probe_is_treated_as_live(tmp_path, monkeypatch):
+    path = tmp_path / "fingerprint.lock"
+    path.write_text(json.dumps({"pid": 12345, "token": "x"}), encoding="utf-8")
+
+    def deny_probe(pid, sig):
+        raise PermissionError("probe denied")
+
+    monkeypatch.setattr(realtime_usage_saver.os, "kill", deny_probe)
+    saver = RealtimeUsageSaver(redact_secrets=False, state_path=tmp_path / "fingerprint.json")
+    assert saver._lock_owner_alive(path) is True

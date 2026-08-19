@@ -19,6 +19,11 @@ class FakeHost:
         self.applied.append((text, fingerprint))
 
 
+class FailingHost(FakeHost):
+    def apply_context(self, text, *, fingerprint):
+        raise RuntimeError("host apply failed")
+
+
 def test_adapter_supports_arbitrary_provider_names():
     for name in ("Cursor", "OpenSpark", "Gemini", "Claude", "OpenAI", "CustomAgent"):
         adapter = create_adapter(name, state_path=None)
@@ -46,6 +51,36 @@ def test_host_adapter_applies_only_changed_context():
     assert first is not None
     assert second is None
     assert len(host.applied) == 1
+
+
+def test_host_apply_failure_does_not_poison_persistent_idempotency(tmp_path):
+    path = tmp_path / "host.json"
+    host = FailingHost()
+    adapter = ProviderAdapter("Claude", state_path=path)
+    try:
+        adapter.save_from_host(host)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected host apply failure")
+
+    assert not path.exists()
+
+
+def test_host_can_retry_after_apply_failure(tmp_path):
+    path = tmp_path / "host.json"
+    failing = FailingHost()
+    adapter = ProviderAdapter("Claude", state_path=path)
+    try:
+        adapter.save_from_host(failing)
+    except RuntimeError:
+        pass
+
+    host = FakeHost()
+    result = ProviderAdapter("Claude", state_path=path).save_from_host(host)
+    assert result is not None
+    assert len(host.applied) == 1
+    assert path.is_file()
 
 
 def test_provider_name_does_not_change_core_fingerprint():

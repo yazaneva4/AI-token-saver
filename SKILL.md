@@ -130,13 +130,29 @@ The unchanged-context check MUST be a fast local operation. It MUST NOT require 
 network request, model invocation, browser action, repository operation, or other
 remote service call.
 
+When the host has a local code/runtime integration, that integration MUST perform
+this check before invoking any model, tokenizer, browser, repository, or other
+remote capability. The skill must not ask another AI model to decide whether the
+context is unchanged.
+
 For unchanged input, the expected path is:
 
 `read fingerprint → compare → minimal acknowledgement → stop`
 
 For changed input, the expected path is:
 
-`read fingerprint → compare → compact changed state → persist fingerprint → apply changed context`
+`read fingerprint → compare → compact changed state → apply changed context → persist fingerprint`
+
+The provider adapter uses transactional host application so a failed `apply_context`
+must not mark the new fingerprint as completed.
+
+### Provider-usage boundary
+
+This skill cannot make the host provider's own response-generation cost or quota
+zero. The skill can prevent **additional** model/tool/network work caused by the
+save operation, but the host model may still consume provider usage simply by
+receiving and executing the skill instruction. Never describe a provider-side
+quota reset or first-message model cost as an engine guarantee.
 
 ### Idempotency invariant
 
@@ -165,7 +181,8 @@ Recommended flow:
 
 Use `save_from_host()` when the host exposes `get_context_state()` and
 `apply_context()`. It automatically skips `apply_context()` when the normalized
-state has not changed.
+state has not changed and persists the fingerprint only after successful host
+application.
 
 Provider identity must not alter the core context fingerprint. Provider-specific
 state files are only for persistence boundaries; they must not be inserted into

@@ -84,6 +84,9 @@ class RealtimeUsageSaver:
                 return None
             try:
                 os.kill(pid, 0)
+            except PermissionError:
+                # The process exists, but this environment does not permit probing it.
+                return True
             except OSError:
                 return False
             return True
@@ -106,7 +109,12 @@ class RealtimeUsageSaver:
                     view = memoryview(payload)
                     while view:
                         written = os.write(fd, view)
+                        if written <= 0:
+                            raise OSError("lock write made no progress")
                         view = view[written:]
+                except OSError:
+                    lock_path.unlink(missing_ok=True)
+                    raise
                 finally:
                     os.close(fd)
                 return None, token

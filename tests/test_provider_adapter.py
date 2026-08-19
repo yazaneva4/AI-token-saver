@@ -24,9 +24,9 @@ class FailingHost(FakeHost):
         raise RuntimeError("host apply failed")
 
 
-def test_adapter_supports_arbitrary_provider_names():
+def test_adapter_supports_arbitrary_provider_names(tmp_path):
     for name in ("Cursor", "OpenSpark", "Gemini", "Claude", "OpenAI", "CustomAgent"):
-        adapter = create_adapter(name, state_path=None)
+        adapter = create_adapter(name, state_path=tmp_path / f"{name}.json")
         result = adapter.save({"project": name, "current_task": "test"})
         assert result.provider == name
         assert result.changed is True

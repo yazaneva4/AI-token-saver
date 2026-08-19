@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -25,8 +26,12 @@ class ProviderSaveResult:
 
 def _provider_state_path(provider: str) -> Path:
     root = Path(os.environ.get("AI_TOKEN_SAVER_STATE_DIR", "~/.ai-token-saver/providers")).expanduser()
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", provider.strip()) or "provider"
-    return root / f"{safe}.json"
+    normalized = provider.strip()
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", normalized) or "provider"
+    # Keep the readable slug, but add a digest so distinct provider names such
+    # as ``foo/bar`` and ``foo_bar`` can never share persistent state.
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+    return root / f"{safe}-{digest}.json"
 
 
 class ProviderAdapter:

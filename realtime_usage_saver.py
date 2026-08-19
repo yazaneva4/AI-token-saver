@@ -75,6 +75,12 @@ class RealtimeUsageSaver:
         except (OSError, ValueError, TypeError):
             return None
 
+    def _refresh_persisted_fingerprint(self) -> str | None:
+        if self.state_path is None:
+            return self.last_fingerprint
+        self.last_fingerprint = self._load_fingerprint()
+        return self.last_fingerprint
+
     def _persist_fingerprint(self, fingerprint: str) -> None:
         if self.state_path is None:
             return
@@ -114,7 +120,8 @@ class RealtimeUsageSaver:
                 pass
 
     def start(self) -> None:
-        """Start a new stream without discarding the persisted fingerprint."""
+        """Start a new stream without discarding or staling the persisted fingerprint."""
+        self._refresh_persisted_fingerprint()
         self._compactor = RealtimeCompactor(
             redact_secrets=self.redact_secrets,
             redaction_mode=self.redaction_mode,
@@ -135,7 +142,7 @@ class RealtimeUsageSaver:
         return self._compactor.feed(chunk)
 
     def finish(self) -> tuple[str, RealtimeUsageResult]:
-        """Flush the final buffered output and atomically claim/persist the fingerprint."""
+        """Flush final output and atomically claim/persist the completed fingerprint."""
         if self._compactor is None:
             self.start()
         if self._finished:
@@ -149,8 +156,8 @@ class RealtimeUsageSaver:
         try:
             previous = self._load_fingerprint() if self.state_path else self.last_fingerprint
             changed = fingerprint != previous
-            self.last_fingerprint = fingerprint
             self._persist_fingerprint(fingerprint)
+            self.last_fingerprint = fingerprint
             result = RealtimeUsageResult(fingerprint, self._compactor.result(), changed)
             self.last_result = result
             self._finished = True
@@ -175,4 +182,5 @@ class RealtimeUsageSaver:
 
     def is_same_input(self, text: str) -> bool:
         mode = self.redaction_mode or ("common" if self.redact_secrets else "off")
-        return state_fingerprint(text, redaction_mode=mode, aggressive=self.aggressive) == self.last_fingerprint
+        previous = self._refresh_persisted_fingerprint()
+        return state_fingerprint(text, redaction_mode=mode, aggressive=self.aggressive) == previous

@@ -28,8 +28,7 @@ information merely to reach a percentage.
 4. Preserve exact names, file paths, commands, model names, versions, APIs,
    configuration values, technical decisions, and error text when important.
 5. Never invent missing information.
-6. Deduplicate conservatively; similar-looking lines are not automatically
-   duplicates.
+6. Deduplicate conservatively; similar-looking lines are not automatically duplicates.
 7. Prefer compact structured records over repeated prose.
 8. Replace clearly outdated values with current values while retaining useful
    history when needed.
@@ -39,6 +38,27 @@ information merely to reach a percentage.
     context is already compacted and saved, another identical command should
     perform little or no additional work and must not recursively process its own
     generated output.
+
+## Command-Only Fast Path
+
+A saver command is an instruction to operate on the host's existing context; the
+command text itself is **not** automatically new context to save.
+
+For `/ai-token-saver`, `/ai-usage-saver`, `/save`, and `/save-all`:
+
+1. Treat the command as a control signal, not as project content.
+2. Do not append the command, skill instructions, acknowledgement, benchmark
+   output, or generated summary to the saved context unless the user explicitly
+   asks for that information to be remembered.
+3. Do not summarize the skill file merely because the skill was loaded.
+4. Do not recursively process the skill's own instructions as user context.
+5. If no host context is available, do not invent one; return a minimal
+   acknowledgement or report that the host integration supplied no saveable state.
+6. If the host exposes a local persistent fingerprint, check it before doing any
+   compaction or external work.
+
+This prevents a host integration from accidentally turning repeated command
+invocations or the skill definition itself into ever-growing saved context.
 
 ## Safe Compaction
 
@@ -198,8 +218,8 @@ the saved context itself.
 ## Secret and Credential Storage
 
 Normal `/save` and `/save-all` operations MUST NOT store passwords, API keys,
-access tokens, authentication codes, master passwords, private credentials, or
-other secrets in ordinary memory.
+access tokens, authentication codes, master passwords, or other secrets in
+ordinary memory.
 
 An explicitly requested secret operation may store a project credential **only
 when the host provides secure secret storage**.

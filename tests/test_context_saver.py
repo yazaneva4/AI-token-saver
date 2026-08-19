@@ -1,4 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
+import json
+import os
+import time
+
 from context_saver import ContextSaver
 
 
@@ -119,6 +123,35 @@ def test_lock_timeout_must_be_positive(tmp_path):
         pass
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_live_owner_lock_is_not_stolen_when_older_than_stale_threshold(tmp_path):
+    path = tmp_path / "live.json"
+    lock = path.with_suffix(".json.lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(json.dumps({"pid": os.getpid(), "token": "live-owner"}), encoding="utf-8")
+    old = time.time() - 100
+    os.utime(lock, (old, old))
+    try:
+        try:
+            ContextSaver(state_path=path, lock_timeout=0.05).save_if_changed(sample_state())
+        except TimeoutError:
+            pass
+        else:
+            raise AssertionError("expected TimeoutError for live lock owner")
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def test_dead_owner_lock_is_recovered(tmp_path):
+    path = tmp_path / "dead.json"
+    lock = path.with_suffix(".json.lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(json.dumps({"pid": 2147483647, "token": "dead-owner"}), encoding="utf-8")
+    result = ContextSaver(state_path=path, lock_timeout=1).save_if_changed(sample_state())
+    assert result is not None
+    assert path.is_file()
+    assert not lock.exists()
 
 
 def test_apply_callback_runs_before_persistence(tmp_path):

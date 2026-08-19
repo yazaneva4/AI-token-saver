@@ -62,10 +62,13 @@ class ProviderAdapter:
         return None if result is None else self._result(result)
 
     def save_from_host(self, host: ContextProvider) -> ProviderSaveResult | None:
-        result = self.save_if_changed(host.get_context_state())
-        if result is not None:
-            host.apply_context(result.text, fingerprint=result.fingerprint)
-        return result
+        # Keep the idempotency lock through the host apply and persist only after
+        # the host confirms success. A failed apply therefore cannot poison state.
+        result = self.saver.save_if_changed_and_apply(
+            host.get_context_state(),
+            lambda text, fingerprint: host.apply_context(text, fingerprint=fingerprint),
+        )
+        return None if result is None else self._result(result)
 
     def _result(self, result: ContextSaveResult) -> ProviderSaveResult:
         return ProviderSaveResult(self.provider, result.changed, result.fingerprint, result.text)

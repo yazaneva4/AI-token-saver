@@ -18,5 +18,14 @@ def test_realtime_fingerprint_survives_new_instance(tmp_path: Path):
     assert second.result is not None and second.result.changed is False
 
 
+def test_realtime_live_instance_refreshes_persisted_fingerprint(tmp_path: Path):
+    state = tmp_path / "realtime.json"
+    first = RealtimeUsageSaver(redact_secrets=False, state_path=state)
+    second = RealtimeUsageSaver(redact_secrets=False, state_path=state)
+    text = "shared stream\n"
+    assert "".join(first.process([text])) == text
+    assert second.is_same_input(text)
+
+
 def test_provider_state_names_cannot_collide():
     assert _provider_state_path("foo/bar") != _provider_state_path("foo_bar")

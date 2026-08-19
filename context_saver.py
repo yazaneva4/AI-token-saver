@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import time
 from typing import Callable, Iterable, Mapping
 
@@ -148,18 +149,45 @@ class ContextSaver:
         temporary.write_text(json.dumps({"fingerprint": fingerprint}, separators=(",", ":")), encoding="utf-8")
         temporary.replace(self.state_path)
 
-    def _acquire_lock(self) -> int | None:
+    def _lock_owner_alive(self, lock_path: Path) -> bool | None:
+        try:
+            raw = lock_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            pid = data.get("pid") if isinstance(data, dict) else None
+            if not isinstance(pid, int) or pid <= 0:
+                return None
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return False
+            return True
+        except (OSError, ValueError, TypeError):
+            return None
+
+    def _acquire_lock(self) -> tuple[int | None, str | None]:
         lock_path = self._lock_path
         if lock_path is None:
-            return None
+            return None, None
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + self.lock_timeout
+        stale_after = max(self.lock_timeout * 2, 1.0)
         while True:
+            token = secrets.token_hex(16)
             try:
-                return os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                payload = json.dumps({"pid": os.getpid(), "token": token}, separators=(",", ":")).encode("utf-8")
+                try:
+                    os.write(fd, payload)
+                except OSError:
+                    os.close(fd)
+                    lock_path.unlink(missing_ok=True)
+                    raise
+                return fd, token
             except FileExistsError:
                 try:
-                    if time.time() - lock_path.stat().st_mtime > self.lock_timeout * 2:
+                    owner_alive = self._lock_owner_alive(lock_path)
+                    age = time.time() - lock_path.stat().st_mtime
+                    if owner_alive is False or (owner_alive is None and age > stale_after):
                         lock_path.unlink(missing_ok=True)
                         continue
                 except OSError:
@@ -168,14 +196,17 @@ class ContextSaver:
                     raise TimeoutError(f"timed out waiting for context lock: {lock_path}")
                 time.sleep(0.01)
 
-    def _release_lock(self, fd: int | None) -> None:
+    def _release_lock(self, lock_state: tuple[int | None, str | None]) -> None:
+        fd, token = lock_state
         lock_path = self._lock_path
         if fd is not None:
             os.close(fd)
-        if lock_path is not None:
+        if lock_path is not None and token is not None:
             try:
-                lock_path.unlink(missing_ok=True)
-            except OSError:
+                data = json.loads(lock_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and data.get("token") == token:
+                    lock_path.unlink(missing_ok=True)
+            except (OSError, ValueError, TypeError):
                 pass
 
     def build(self, state: Mapping[str, object]) -> ContextSnapshot:
@@ -196,17 +227,16 @@ class ContextSaver:
     def save(self, state: Mapping[str, object]) -> ContextSaveResult:
         snapshot = self.build(state)
         fingerprint = snapshot.fingerprint()
-        fd = self._acquire_lock()
+        lock_state = self._acquire_lock()
         try:
             previous = self._load_fingerprint() if self.state_path else self.last_fingerprint
             changed = fingerprint != previous
-            # Only update in-memory state after durable persistence succeeds.
             self._persist_fingerprint(fingerprint)
             self.last_fingerprint = fingerprint
             self.last_snapshot = snapshot
             return ContextSaveResult(snapshot, fingerprint, changed, snapshot.to_text())
         finally:
-            self._release_lock(fd)
+            self._release_lock(lock_state)
 
     def save_if_changed(self, state: Mapping[str, object]) -> ContextSaveResult | None:
         return self.save_if_changed_and_apply(state)
@@ -225,7 +255,7 @@ class ContextSaver:
         """
         snapshot = self.build(state)
         fingerprint = snapshot.fingerprint()
-        fd = self._acquire_lock()
+        lock_state = self._acquire_lock()
         try:
             previous = self._load_fingerprint() if self.state_path else self.last_fingerprint
             self.last_fingerprint = previous
@@ -238,10 +268,10 @@ class ContextSaver:
             self.last_snapshot = snapshot
             return ContextSaveResult(snapshot, fingerprint, True, snapshot.to_text())
         finally:
-            self._release_lock(fd)
+            self._release_lock(lock_state)
 
     def reset(self) -> None:
-        fd = self._acquire_lock()
+        lock_state = self._acquire_lock()
         try:
             self.last_fingerprint = None
             self.last_snapshot = None
@@ -249,4 +279,4 @@ class ContextSaver:
                 try: self.state_path.unlink(missing_ok=True)
                 except OSError: pass
         finally:
-            self._release_lock(fd)
+            self._release_lock(lock_state)

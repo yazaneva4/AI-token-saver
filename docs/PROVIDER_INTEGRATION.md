@@ -19,8 +19,10 @@ ContextSaver
         +--> Secret protection
 ```
 
-The adapter only translates the host's state into the common context-state
-mapping and applies a changed compact context back to the host.
+The adapter translates the host's state into the common context-state mapping and
+applies a changed compact context back to the host. The provider adapter uses a
+transactional apply path: the persistent fingerprint is committed only after the
+host accepts the changed context.
 
 ## Supported host styles
 
@@ -47,10 +49,21 @@ A host integration provides:
   `current_task`, `decisions`, `bugs`, `fixes`, `files`, `commands`, `tests`,
   `services`, and `next_steps`.
 - `apply_context(text, fingerprint=...)` -> stores the compact context using the
-  host's own supported mechanism.
+  host's own supported mechanism and raises an error if the application fails.
 
 Use `ProviderAdapter.save_from_host(host)` to save only when the normalized state
-changed.
+changed. The adapter keeps the idempotency lock through the host apply and only
+persists the new fingerprint after successful application.
+
+## Fast-path requirement
+
+When a host provides local code execution, the host integration should perform the
+persistent fingerprint check before any model, tokenizer, browser, repository, or
+network operation. The saver should never call another AI model merely to decide
+whether an unchanged state needs saving.
+
+The core engine cannot eliminate the provider's own cost for executing the skill
+instruction. It can only prevent additional work caused by the save operation.
 
 ## Provider-specific token counting
 
@@ -66,5 +79,6 @@ need credentials must use their secure secret facilities separately.
 ## Important limitation
 
 The adapter does not magically install itself into every provider. Each host needs
-a thin integration using its own extension/skill/plugin/MCP/API mechanism. The
-core remains provider-neutral so those integrations do not fork the saver logic.
+a thin native integration using its own extension/skill/plugin/MCP/API mechanism.
+The core remains provider-neutral so those integrations do not fork the saver
+logic.

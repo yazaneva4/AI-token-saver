@@ -73,3 +73,21 @@ def test_reset_allows_new_operation():
     saver.reset()
     assert saver.run("same", operation) == (2, True)
     assert len(calls) == 2
+
+
+def test_usage_checkpoint_redacts_secrets_from_normalized_state():
+    checkpoint = UsageCheckpoint(
+        project="demo",
+        services=[ServiceState("Gmail", {"api_key": "super-secret-key-12345678901234567890"})],
+        next_steps=["use password=do-not-store-this"],
+    )
+    normalized = checkpoint.normalized()
+    assert "super-secret-key" not in str(normalized)
+    assert "do-not-store-this" not in str(normalized)
+    assert "[REDACTED]" in str(normalized)
+
+
+def test_mapping_fingerprint_redacts_secret_values():
+    safe = state_fingerprint({"service": "Gmail", "token": "secret-token-12345678901234567890"})
+    changed_secret = state_fingerprint({"service": "Gmail", "token": "another-token-12345678901234567890"})
+    assert safe == changed_secret

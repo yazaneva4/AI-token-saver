@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import re
 import time
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
 PRESERVED_FIELDS = ("project", "current_task", "decisions", "bugs", "fixes", "files", "commands", "tests", "services", "next_steps")
 _SECRET_PATTERNS = (
@@ -200,14 +200,29 @@ class ContextSaver:
         try:
             previous = self._load_fingerprint() if self.state_path else self.last_fingerprint
             changed = fingerprint != previous
-            self.last_fingerprint = fingerprint
+            # Only update in-memory state after durable persistence succeeds.
             self._persist_fingerprint(fingerprint)
+            self.last_fingerprint = fingerprint
             self.last_snapshot = snapshot
             return ContextSaveResult(snapshot, fingerprint, changed, snapshot.to_text())
         finally:
             self._release_lock(fd)
 
     def save_if_changed(self, state: Mapping[str, object]) -> ContextSaveResult | None:
+        return self.save_if_changed_and_apply(state)
+
+    def save_if_changed_and_apply(
+        self,
+        state: Mapping[str, object],
+        apply: Callable[[str, str], None] | None = None,
+    ) -> ContextSaveResult | None:
+        """Atomically check, optionally apply, then persist a changed snapshot.
+
+        When ``apply`` is supplied, it runs while the idempotency lock is held and
+        the fingerprint is persisted only after the host confirms the context was
+        applied successfully. This prevents a failed host update from poisoning
+        durable idempotency state.
+        """
         snapshot = self.build(state)
         fingerprint = snapshot.fingerprint()
         fd = self._acquire_lock()
@@ -216,8 +231,10 @@ class ContextSaver:
             self.last_fingerprint = previous
             if fingerprint == previous:
                 return None
-            self.last_fingerprint = fingerprint
+            if apply is not None:
+                apply(snapshot.to_text(), fingerprint)
             self._persist_fingerprint(fingerprint)
+            self.last_fingerprint = fingerprint
             self.last_snapshot = snapshot
             return ContextSaveResult(snapshot, fingerprint, True, snapshot.to_text())
         finally:

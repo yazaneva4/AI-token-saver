@@ -119,3 +119,52 @@ def test_lock_timeout_must_be_positive(tmp_path):
         pass
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_apply_callback_runs_before_persistence(tmp_path):
+    path = tmp_path / "transaction.json"
+    saver = ContextSaver(state_path=path)
+    observed = []
+
+    def apply(text, fingerprint):
+        observed.append((text, fingerprint, path.exists()))
+
+    result = saver.save_if_changed_and_apply(sample_state(), apply)
+    assert result is not None
+    assert observed and observed[0][2] is False
+    assert path.is_file()
+
+
+def test_failed_apply_does_not_poison_persistent_state(tmp_path):
+    path = tmp_path / "transaction.json"
+    saver = ContextSaver(state_path=path)
+
+    def fail(text, fingerprint):
+        raise RuntimeError("apply failed")
+
+    try:
+        saver.save_if_changed_and_apply(sample_state(), fail)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert not path.exists()
+    assert saver.last_fingerprint is None
+
+
+def test_successful_retry_after_failed_apply_can_persist(tmp_path):
+    path = tmp_path / "transaction.json"
+    saver = ContextSaver(state_path=path)
+
+    def fail(text, fingerprint):
+        raise RuntimeError("apply failed")
+
+    try:
+        saver.save_if_changed_and_apply(sample_state(), fail)
+    except RuntimeError:
+        pass
+
+    result = saver.save_if_changed_and_apply(sample_state(), lambda text, fingerprint: None)
+    assert result is not None
+    assert path.is_file()

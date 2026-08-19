@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import secrets
 import time
 from typing import Iterable, Iterator
 
@@ -89,18 +90,45 @@ class RealtimeUsageSaver:
         temporary.write_text(json.dumps({"fingerprint": fingerprint}, separators=(",", ":")), encoding="utf-8")
         temporary.replace(self.state_path)
 
-    def _acquire_lock(self) -> int | None:
+    def _lock_owner_alive(self, lock_path: Path) -> bool | None:
+        try:
+            raw = lock_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            pid = data.get("pid") if isinstance(data, dict) else None
+            if not isinstance(pid, int) or pid <= 0:
+                return None
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return False
+            return True
+        except (OSError, ValueError, TypeError):
+            return None
+
+    def _acquire_lock(self) -> tuple[int | None, str | None]:
         lock_path = self._lock_path
         if lock_path is None:
-            return None
+            return None, None
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + self.lock_timeout
+        stale_after = max(self.lock_timeout * 2, 1.0)
         while True:
+            token = secrets.token_hex(16)
             try:
-                return os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                payload = json.dumps({"pid": os.getpid(), "token": token}, separators=(",", ":")).encode("utf-8")
+                try:
+                    os.write(fd, payload)
+                except OSError:
+                    os.close(fd)
+                    lock_path.unlink(missing_ok=True)
+                    raise
+                return fd, token
             except FileExistsError:
                 try:
-                    if time.time() - lock_path.stat().st_mtime > self.lock_timeout * 2:
+                    owner_alive = self._lock_owner_alive(lock_path)
+                    age = time.time() - lock_path.stat().st_mtime
+                    if owner_alive is False or (owner_alive is None and age > stale_after):
                         lock_path.unlink(missing_ok=True)
                         continue
                 except OSError:
@@ -109,14 +137,17 @@ class RealtimeUsageSaver:
                     raise TimeoutError(f"timed out waiting for realtime saver lock: {lock_path}")
                 time.sleep(0.01)
 
-    def _release_lock(self, fd: int | None) -> None:
+    def _release_lock(self, lock_state: tuple[int | None, str | None]) -> None:
+        fd, token = lock_state
         lock_path = self._lock_path
         if fd is not None:
             os.close(fd)
-        if lock_path is not None:
+        if lock_path is not None and token is not None:
             try:
-                lock_path.unlink(missing_ok=True)
-            except OSError:
+                data = json.loads(lock_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and data.get("token") == token:
+                    lock_path.unlink(missing_ok=True)
+            except (OSError, ValueError, TypeError):
                 pass
 
     def start(self) -> None:
@@ -152,7 +183,7 @@ class RealtimeUsageSaver:
         original = self._compactor.original
         mode = self._compactor.redaction_mode
         fingerprint = state_fingerprint(original, redaction_mode=mode, aggressive=self.aggressive)
-        fd = self._acquire_lock()
+        lock_state = self._acquire_lock()
         try:
             previous = self._load_fingerprint() if self.state_path else self.last_fingerprint
             changed = fingerprint != previous
@@ -163,7 +194,7 @@ class RealtimeUsageSaver:
             self._finished = True
             return final_output, result
         finally:
-            self._release_lock(fd)
+            self._release_lock(lock_state)
 
     def process(self, chunks: Iterable[str]) -> Iterator[str]:
         """Yield realtime output for a single stream, including final buffered data."""

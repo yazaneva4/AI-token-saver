@@ -158,6 +158,12 @@ class ContextSaver:
                 return None
             try:
                 os.kill(pid, 0)
+            except PermissionError:
+                # The process exists, but this user is not allowed to signal it.
+                # Treat it as alive rather than stealing its lock.
+                return True
+            except ProcessLookupError:
+                return False
             except OSError:
                 return False
             return True

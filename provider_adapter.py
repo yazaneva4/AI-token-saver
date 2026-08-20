@@ -24,6 +24,27 @@ class ProviderSaveResult:
     text: str
 
 
+@dataclass(frozen=True)
+class PreparedProviderRequest:
+    """A compact provider request prepared before the provider is called.
+
+    Preparation never claims the request succeeded and never persists the
+    fingerprint. Call ``ProviderAdapter.save_after_response`` only after the
+    provider successfully accepts the request/response cycle.
+    """
+    provider: str
+    request: str
+    context: str
+    fingerprint: str
+
+    def render(self) -> str:
+        if not self.context:
+            return self.request
+        if not self.request:
+            return self.context
+        return f"{self.context}\n\nUSER REQUEST:\n{self.request}"
+
+
 def _provider_state_path(provider: str) -> Path:
     root = Path(os.environ.get("AI_TOKEN_SAVER_STATE_DIR", "~/.ai-token-saver/providers")).expanduser()
     normalized = provider.strip()
@@ -60,6 +81,28 @@ class ProviderAdapter:
     def save_if_changed(self, state: Mapping[str, Any]) -> ProviderSaveResult | None:
         result = self.saver.save_if_changed(state)
         return None if result is None else self._result(result)
+
+    def prepare_request(self, state: Mapping[str, Any], request: str) -> PreparedProviderRequest:
+        """Compact context for the next provider request without persisting it.
+
+        This is intentionally a pre-request operation: it does not call a
+        provider, does not mutate a running generation, and does not claim the
+        request succeeded. Persist the checkpoint after a successful cycle with
+        ``save_after_response``.
+        """
+        if not isinstance(request, str):
+            raise TypeError("request must be a string")
+        snapshot = self.saver.build(state)
+        return PreparedProviderRequest(
+            provider=self.provider,
+            request=request,
+            context=snapshot.to_text(),
+            fingerprint=snapshot.fingerprint(),
+        )
+
+    def save_after_response(self, state: Mapping[str, Any]) -> ProviderSaveResult | None:
+        """Persist useful state only after the provider cycle has succeeded."""
+        return self.save_if_changed(state)
 
     def save_from_host(self, host: ContextProvider) -> ProviderSaveResult | None:
         # Keep the idempotency lock through the host apply and persist only after

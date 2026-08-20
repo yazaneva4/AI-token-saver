@@ -43,6 +43,51 @@ def test_adapter_short_circuits_identical_state():
     assert second is None
 
 
+def test_prepare_request_compacts_context_before_provider_call_without_persisting(tmp_path):
+    path = tmp_path / "claude.json"
+    adapter = ProviderAdapter("Claude", state_path=path)
+    state = {
+        "project": "OpenSpark",
+        "current_task": "Route a request",
+        "decisions": ["Use provider-neutral adapters", "Use provider-neutral adapters"],
+    }
+
+    prepared = adapter.prepare_request(state, "Implement the next routing step")
+
+    assert prepared.provider == "Claude"
+    assert prepared.fingerprint
+    assert "PROJECT:\nOpenSpark" in prepared.context
+    assert prepared.context.count("Use provider-neutral adapters") == 1
+    assert prepared.render().endswith("USER REQUEST:\nImplement the next routing step")
+    assert not path.exists(), "preparation must not persist state before provider success"
+
+
+def test_prepare_request_does_not_change_request_or_call_provider():
+    adapter = ProviderAdapter("Cursor", saver=ContextSaver())
+    request = "Keep this exact request."
+    prepared = adapter.prepare_request({"project": "Demo"}, request)
+
+    assert prepared.request == request
+    assert prepared.render() == "PROJECT:\nDemo\n\nUSER REQUEST:\nKeep this exact request."
+
+
+def test_save_after_response_persists_only_after_success(tmp_path):
+    path = tmp_path / "openspark.json"
+    adapter = ProviderAdapter("OpenSpark", state_path=path)
+    state = {"project": "OpenSpark", "current_task": "successful cycle"}
+
+    prepared = adapter.prepare_request(state, "Do the work")
+    assert prepared.fingerprint
+    assert not path.exists()
+
+    result = adapter.save_after_response(state)
+    assert result is not None
+    assert result.fingerprint == prepared.fingerprint
+    assert path.is_file()
+
+    assert adapter.save_after_response(state) is None
+
+
 def test_host_adapter_applies_only_changed_context():
     host = FakeHost()
     adapter = ProviderAdapter("Cursor", saver=ContextSaver())

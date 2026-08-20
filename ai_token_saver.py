@@ -519,3 +519,29 @@ def merge_memory(current: Memory, incoming: Memory) -> Memory:
         preferences=merge_list(current.preferences, incoming.preferences),
         history=merge_list(current.history, incoming.history),
     )
+
+
+def memory_to_text(memory: Memory) -> str:
+    """Render structured memory as compact, readable context text."""
+    if not isinstance(memory, Memory):
+        raise TypeError("memory must be a Memory")
+
+    sections: list[str] = []
+    for title, value in (("PROJECT", memory.project), ("GOAL", memory.goal)):
+        if value:
+            sections.append(f"{title}: {value}")
+
+    for title, values in (
+        ("STATE", memory.state),
+        ("DECISIONS", memory.decisions),
+        ("FILES", memory.files),
+        ("ISSUES", memory.issues),
+        ("NEXT", memory.next_steps),
+        ("PREFERENCES", memory.preferences),
+        ("HISTORY", memory.history),
+    ):
+        entries = [value for value in values if value]
+        if entries:
+            sections.append(title + ":\n" + "\n".join(f"- {value}" for value in entries))
+
+    return "\n\n".join(sections)

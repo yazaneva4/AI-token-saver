@@ -90,7 +90,7 @@ class ContextSnapshot:
         sections: list[str] = []
         for title, value in (("PROJECT", self.project), ("CURRENT TASK", self.current_task)):
             if value:
-                sections.append(f"{title}:\n{value}")
+                sections.append(f"{title}: {value}")
         for title, values in (("DECISIONS", self.decisions), ("BUGS", self.bugs), ("FIXES", self.fixes), ("FILES", self.files), ("COMMANDS", self.commands), ("TESTS", self.tests), ("NEXT STEPS", self.next_steps)):
             if values:
                 sections.append(title + ":\n" + "\n".join(f"- {value}" for value in values))

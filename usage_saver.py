@@ -23,6 +23,10 @@ _SECRET_PATTERNS = (
     re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"),
 )
 
+_SECRET_FIELD_RE = re.compile(
+    r"(?i)^(?:api[-_]?key|access[-_]?token|auth[-_]?token|token|password|secret)$"
+)
+
 
 def _redact(value: object) -> str:
     if value is None:
@@ -35,6 +39,15 @@ def _redact(value: object) -> str:
     return text
 
 
+def _is_secret_field(name: object) -> bool:
+    return isinstance(name, str) and bool(_SECRET_FIELD_RE.fullmatch(name.strip()))
+
+
+def _redact_field_value(name: object, value: object) -> str:
+    text = _redact(value)
+    return "[REDACTED]" if text and _is_secret_field(name) else text
+
+
 @dataclass
 class ServiceState:
     """Compact, safe state for one daily-work service."""
@@ -42,14 +55,12 @@ class ServiceState:
     values: dict[str, str] = field(default_factory=dict)
 
     def normalized(self) -> dict[str, object]:
-        return {
-            "name": _redact(self.name).upper(),
-            "values": {
-                _redact(k): _redact(v)
-                for k, v in sorted(self.values.items(), key=lambda item: str(item[0]))
-                if _redact(v)
-            },
-        }
+        values: dict[str, str] = {}
+        for key, value in sorted(self.values.items(), key=lambda item: str(item[0])):
+            safe_value = _redact_field_value(key, value)
+            if safe_value:
+                values[_redact(key)] = safe_value
+        return {"name": _redact(self.name).upper(), "values": values}
 
 
 @dataclass
@@ -120,9 +131,11 @@ def state_fingerprint(state: Mapping[str, object] | UsageCheckpoint | str) -> st
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _normalize_scalar(value: Any) -> object:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return _redact(value) if isinstance(value, str) else value
+def _normalize_scalar(value: Any, *, key: object | None = None) -> object:
+    if isinstance(value, str):
+        return _redact_field_value(key, value)
+    if value is None or isinstance(value, (int, float, bool)):
+        return value
     return _redact(value)
 
 
@@ -134,9 +147,12 @@ def _normalize_mapping(value: Mapping[str, object]) -> dict[str, object]:
         if isinstance(item, Mapping):
             result[safe_key] = _normalize_mapping(item)
         elif isinstance(item, (list, tuple)):
-            result[safe_key] = [_normalize_mapping(x) if isinstance(x, Mapping) else _normalize_scalar(x) for x in item]
+            result[safe_key] = [
+                _normalize_mapping(x) if isinstance(x, Mapping) else _normalize_scalar(x, key=key)
+                for x in item
+            ]
         else:
-            result[safe_key] = _normalize_scalar(item)
+            result[safe_key] = _normalize_scalar(item, key=key)
     return result
 
 

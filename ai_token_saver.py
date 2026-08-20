@@ -246,19 +246,20 @@ class RealtimeCompactor:
         self._original_parts: list[str] = []
         self._output_parts: list[str] = []
         self._pending_lines: list[tuple[str, str]] = []
+        self._pending_technical = False
         self.finished = False
 
     def _flush_pending(self, *, force: bool = False) -> str:
         if not self._pending_lines:
             return ""
-        snapshot = [line for line, _ in self._pending_lines]
-        if _looks_like_technical_content(snapshot):
+        if self._pending_technical:
             self._technical = True
         if self.aggressive and not self._technical and not force and len(self._pending_lines) < self._LOOKAHEAD_LINES:
             return ""
 
         pending = self._pending_lines
         self._pending_lines = []
+        self._pending_technical = False
         output: list[str] = []
         for line, newline in pending:
             key = _line_key(line)
@@ -281,6 +282,7 @@ class RealtimeCompactor:
             return ""
         if self.aggressive:
             self._pending_lines.append((line, newline))
+            self._pending_technical = self._pending_technical or _looks_like_code_line(line)
             return self._flush_pending()
 
         self._technical = self._technical or _looks_like_code_line(line) or _looks_like_technical_content([line])
@@ -517,50 +519,3 @@ def merge_memory(current: Memory, incoming: Memory) -> Memory:
         preferences=merge_list(current.preferences, incoming.preferences),
         history=merge_list(current.history, incoming.history),
     )
-
-
-def memory_to_text(memory: Memory) -> str:
-    sections: list[str] = []
-    if memory.project:
-        sections.append(f"PROJECT: {memory.project}")
-    if memory.goal:
-        sections.append(f"GOAL: {memory.goal}")
-    for title, values in [
-        ("STATE", memory.state),
-        ("DECISIONS", memory.decisions),
-        ("FILES", memory.files),
-        ("ISSUES", memory.issues),
-        ("NEXT", memory.next_steps),
-        ("PREFERENCES", memory.preferences),
-        ("HISTORY", memory.history),
-    ]:
-        values = _deduplicate_memory_facts(values)
-        if values:
-            sections.append(title + ":\n" + "\n".join(f"- {value}" for value in values))
-    return "\n\n".join(sections)
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Compact text for AI Token Saver.")
-    parser.add_argument("text", nargs="?", help="Text to compact.")
-    parser.add_argument("--keep-secrets", action="store_true", help="Disable default secret redaction.")
-    parser.add_argument("--redaction", choices=("off", "common", "strict"), help="Secret redaction mode.")
-    parser.add_argument("--aggressive", action="store_true", help="Use global duplicate removal for non-technical prose.")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed metrics.")
-    args = parser.parse_args()
-    mode = args.redaction or ("off" if args.keep_secrets else "common")
-    result = compact_text_with_metrics(args.text or "", redaction_mode=mode, aggressive=args.aggressive)
-    print(result.compacted, end="" if result.compacted.endswith("\n") else "\n")
-    if args.verbose:
-        print("\n--- Metrics ---")
-        print(f"Input tokens:  {result.in_tokens}")
-        print(f"Output tokens: {result.out_tokens}")
-        print(f"Saved tokens:  {result.in_tokens - result.out_tokens}")
-        print(f"Reduction:     {result.reduction_percent:.1%}")
-        print(f"Token change:  {result.token_change_percent:+.1f}%")
-        print(f"Output grew:   {result.output_grew}")
-        print(f"Token count:   {result.token_count_source}")
-    else:
-        print(f"Measured token reduction: {result.reduction_percent:.1%} ({result.token_count_source})")

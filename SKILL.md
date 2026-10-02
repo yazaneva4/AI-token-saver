@@ -312,6 +312,14 @@ Spawn autonomous subagents to offload context-heavy work. Subagents burn their o
 
 **Golden Rule:** If task + intermediate work would add 3,000+ tokens to parent context → use a subagent.
 
+### Automated runner
+
+`python delegate.py --kind <kind> --prompt-file task.txt [--context-file ctx.txt] [--json]`
+compacts the context, routes by tier, runs the model, compacts the answer and
+prints it (with `--json`: tier, model, tokens in/out). Needs `codex` on PATH for
+small work, `TOGETHER_API_KEY` + `AITS_MEDIUM_MODEL` for medium/ultra, and
+`ANTHROPIC_API_KEY` for high/ultra. Prefer it over hand-written commands.
+
 ### Model tiers
 
 | Tier | Work | Model | Runner |

@@ -231,3 +231,5 @@ medium and high together (Together drafts, Sonnet verifies), small and image
 generation → GPT luna through the Codex CLI. Override ids with `AITS_HIGH_MODEL`,
 `AITS_MEDIUM_MODEL` (required for medium/ultra), `AITS_SMALL_MODEL`. This
 replaces the separate use-codex skill.
+
+`python delegate.py --kind edit --prompt-file task.txt` runs the routed tier(s) and returns the compacted answer.

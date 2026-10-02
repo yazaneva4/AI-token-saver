@@ -1,13 +1,15 @@
 """Tiered model routing for delegated work.
 
-high   -> latest Sonnet (the parent Claude / Anthropic API)
-medium -> Together (OpenAI-compatible chat API)
-ultra  -> medium and high together: Together drafts, Sonnet verifies
-small  -> GPT "luna" via the Codex CLI (also used for image generation)
+Every tier is a draft step followed (except low) by a verify step:
 
-Model ids are defaults only; override them with environment variables
-(AITS_HIGH_MODEL, AITS_MEDIUM_MODEL, AITS_SMALL_MODEL) because provider
-model names change.
+low    -> GPT "luna" via the Codex CLI (also image generation)
+medium -> two mediums together: Together drafts, a second Together pass verifies
+high   -> medium + high: Together drafts, latest Sonnet verifies
+ultra  -> high + high: latest Sonnet drafts, latest Sonnet verifies
+         (very large work, best effort)
+
+Model ids are defaults only; override with AITS_LOW_MODEL, AITS_MEDIUM_MODEL,
+AITS_HIGH_MODEL because provider model names change.
 """
 from __future__ import annotations
 
@@ -15,60 +17,78 @@ from dataclasses import dataclass
 import os
 import shlex
 
-HIGH, MEDIUM, ULTRA, SMALL = "high", "medium", "ultra", "small"
-SMALL_KINDS = {"search", "lookup", "fetch", "rename", "format", "summary", "image", "image_gen"}
-MEDIUM_KINDS = {"edit", "implement", "refactor", "review", "tests", "docs", "analysis"}
-ULTRA_KINDS = {"critical", "release", "migration", "large_feature"}
-HIGH_KINDS = {"architecture", "plan", "debug", "security", "multi_file_refactor", "research"}
-_DEFAULTS = {HIGH: "claude-sonnet-5-5", MEDIUM: "", ULTRA: "", SMALL: "luna"}
-_ENV = {HIGH: "AITS_HIGH_MODEL", MEDIUM: "AITS_MEDIUM_MODEL", ULTRA: "AITS_MEDIUM_MODEL", SMALL: "AITS_SMALL_MODEL"}
-_PROVIDER = {HIGH: "anthropic", MEDIUM: "together", ULTRA: "together+anthropic", SMALL: "codex"}
+LOW, MEDIUM, HIGH, ULTRA = "low", "medium", "high", "ultra"
+LOW_KINDS = {"search", "lookup", "fetch", "rename", "format", "summary", "image", "image_gen"}
+MEDIUM_KINDS = {"edit", "implement", "tests", "docs", "analysis", "review"}
+HIGH_KINDS = {"architecture", "plan", "debug", "security", "multi_file_refactor", "refactor", "research"}
+ULTRA_KINDS = {"critical", "release", "migration", "large_feature", "large_codebase"}
+_DEFAULTS = {"low": "luna", "medium": "", "high": "claude-sonnet-5-5"}
+_ENV = {"low": "AITS_LOW_MODEL", "medium": "AITS_MEDIUM_MODEL", "high": "AITS_HIGH_MODEL"}
+_PROVIDER = {"low": "codex", "medium": "together", "high": "anthropic"}
+# tier -> (draft level, verify level or None)
+_PLAN = {LOW: ("low", None), MEDIUM: ("medium", "medium"), HIGH: ("medium", "high"), ULTRA: ("high", "high")}
+
+
+@dataclass(frozen=True)
+class Step:
+    provider: str
+    model: str
+    reasoning: str | None = None
 
 
 @dataclass(frozen=True)
 class Route:
     tier: str
-    provider: str
-    model: str
-    reasoning: str | None = None
+    steps: tuple[Step, ...]
 
-    def codex_command(self, output_file: str) -> list[str]:
-        """Argv for a Codex CLI subagent; prompt goes on stdin (``-``)."""
-        if self.provider != "codex":
-            raise ValueError(f"{self.provider} tier is not run through the Codex CLI")
-        cmd = ["codex", "exec", "--yolo", "--skip-git-repo-check", "-m", self.model]
-        if self.reasoning:
-            cmd += ["-c", f'model_reasoning_effort="{self.reasoning}"']
-        return cmd + ["-o", output_file, "-"]
+    @property
+    def provider(self) -> str:
+        return self.steps[0].provider
 
-    def shell(self, output_file: str) -> str:
-        return " ".join(shlex.quote(p) for p in self.codex_command(output_file))
+    @property
+    def model(self) -> str:
+        return self.steps[0].model
+
+    @property
+    def paired(self) -> bool:
+        return len(self.steps) == 2
+
+
+def codex_command(step: Step, output_file: str) -> list[str]:
+    """Argv for a Codex CLI subagent; prompt goes on stdin (``-``)."""
+    if step.provider != "codex":
+        raise ValueError(f"{step.provider} step is not run through the Codex CLI")
+    cmd = ["codex", "exec", "--yolo", "--skip-git-repo-check", "-m", step.model]
+    if step.reasoning:
+        cmd += ["-c", f'model_reasoning_effort="{step.reasoning}"']
+    return cmd + ["-o", output_file, "-"]
+
+
+def shell(step: Step, output_file: str) -> str:
+    return " ".join(shlex.quote(p) for p in codex_command(step, output_file))
 
 
 def classify(kind: str, *, tokens: int = 0) -> str:
     """Pick a tier from a task kind; unknown kinds fall back to size."""
     k = kind.strip().lower().replace("-", "_").replace(" ", "_")
-    if k in SMALL_KINDS:
-        return SMALL
-    if k in ULTRA_KINDS:
+    for tier, kinds in ((LOW, LOW_KINDS), (ULTRA, ULTRA_KINDS), (HIGH, HIGH_KINDS), (MEDIUM, MEDIUM_KINDS)):
+        if k in kinds:
+            return tier
+    if tokens > 60000:
         return ULTRA
-    if k in HIGH_KINDS:
-        return HIGH
-    if k in MEDIUM_KINDS:
-        return MEDIUM
-    return SMALL if tokens and tokens < 1500 else HIGH if tokens > 20000 else MEDIUM
+    return LOW if tokens and tokens < 1500 else HIGH if tokens > 20000 else MEDIUM
+
+
+def _step(level: str, env) -> Step:
+    model = env.get(_ENV[level]) or _DEFAULTS[level]
+    if not model:
+        raise ValueError(f"set {_ENV[level]} to a Together model id for medium work")
+    return Step(_PROVIDER[level], model, "low" if level == "low" else None)
 
 
 def route(kind: str, *, tokens: int = 0, env: dict[str, str] | None = None) -> Route:
     env = os.environ if env is None else env
     tier = classify(kind, tokens=tokens)
-    model = env.get(_ENV[tier]) or _DEFAULTS[tier]
-    if tier in (MEDIUM, ULTRA) and not model:
-        raise ValueError("set AITS_MEDIUM_MODEL to a Together model id for medium work")
-    return Route(tier, _PROVIDER[tier], model, "low" if tier == SMALL else None)
-
-
-def verifier(r: Route, env: dict[str, str] | None = None) -> str | None:
-    """Model that checks the draft when tiers work together (ultra only)."""
-    env = os.environ if env is None else env
-    return (env.get(_ENV[HIGH]) or _DEFAULTS[HIGH]) if r.tier == ULTRA else None
+    draft, verify = _PLAN[tier]
+    steps = (_step(draft, env),) + ((_step(verify, env),) if verify else ())
+    return Route(tier, steps)

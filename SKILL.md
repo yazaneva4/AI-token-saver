@@ -315,21 +315,25 @@ Spawn autonomous subagents to offload context-heavy work. Subagents burn their o
 ### Automated runner
 
 `python delegate.py --kind <kind> --prompt-file task.txt [--context-file ctx.txt] [--json]`
-compacts the context, routes by tier, runs the model, compacts the answer and
-prints it (with `--json`: tier, model, tokens in/out). Needs `codex` on PATH for
-small work, `TOGETHER_API_KEY` + `AITS_MEDIUM_MODEL` for medium/ultra, and
-`ANTHROPIC_API_KEY` for high/ultra. Prefer it over hand-written commands.
+compacts the context, routes by tier, runs the draft step (then the verify step
+for paired tiers), compacts the answer and prints it (with `--json`: tier,
+models, tokens in/out). Needs `codex` on PATH for low, `TOGETHER_API_KEY` +
+`AITS_MEDIUM_MODEL` for medium/high, and `ANTHROPIC_API_KEY` for high/ultra.
+Prefer it over hand-written commands.
 
 ### Model tiers
 
-| Tier | Work | Model | Runner |
-|------|------|-------|--------|
-| high | architecture, planning, hard debugging, security, multi-file refactors, long research | latest Sonnet (`claude-sonnet-5-5`) | the parent Claude / Anthropic API |
-| medium | normal edits, implementation, review, tests, docs, analysis | Together (`AITS_MEDIUM_MODEL`) | Together chat API |
-| ultra | critical, release, migrations, large features | medium + high together | Together drafts, latest Sonnet verifies |
-| small | search, lookup, fetch, rename, formatting, summaries, **image generation** | GPT luna (`luna`) | Codex CLI, `low` reasoning |
+Paired tiers run two models together: the first drafts, the second verifies and
+corrects the draft.
 
-`model_router.py` implements this table: `route(kind, tokens=...)` returns the tier, provider, model and (for Codex) the exact command. Override model ids with `AITS_HIGH_MODEL`, `AITS_MEDIUM_MODEL`, `AITS_SMALL_MODEL`; provider model names change. `AITS_MEDIUM_MODEL` has no default and must be set.
+| Tier | Work | Models |
+|------|------|--------|
+| low | search, lookup, fetch, rename, formatting, summaries, **image generation** | GPT luna via Codex CLI, `low` reasoning |
+| medium | normal edits, implementation, tests, docs, analysis, review | medium + medium (Together draft, Together verify) |
+| high | architecture, planning, hard debugging, security, multi-file refactors, research | medium + high (Together draft, latest Sonnet verify) |
+| ultra | very large work: critical changes, releases, migrations, large features or codebases (also any task over ~60k tokens) | high + high (latest Sonnet draft, latest Sonnet verify), best effort |
+
+`model_router.py` implements this table: `route(kind, tokens=...)` returns the tier and its steps (provider, model). Override model ids with `AITS_LOW_MODEL`, `AITS_MEDIUM_MODEL`, `AITS_HIGH_MODEL`; provider model names change. `AITS_MEDIUM_MODEL` has no default and must be set for medium and high.
 
 ### Instructions
 
@@ -356,7 +360,7 @@ Vague prompts ("Research authentication") produce vague work. Name the directori
 
 ### Invocations
 
-**Small tier (Codex CLI, GPT luna).** Pipe the prompt via stdin with `-`; capture output with `-o`:
+**Low tier (Codex CLI, GPT luna).** Pipe the prompt via stdin with `-`; capture output with `-o`:
 
 ```bash
 cat <<'EOF' | codex exec --yolo --skip-git-repo-check \
@@ -369,7 +373,7 @@ result=$(cat /tmp/codex-result.txt)
 
 Use `--json` instead of `-o` only for machine-parsable output (`jq -r 'select(.event=="turn.completed") | .content'`). For image generation use the same command with a prompt that asks for the image file path as the return value.
 
-**Medium tier (Together).** OpenAI-compatible endpoint; `TOGETHER_API_KEY` stays in the environment, never in prompts or saved context:
+**Medium steps (Together).** OpenAI-compatible endpoint; `TOGETHER_API_KEY` stays in the environment, never in prompts or saved context:
 
 ```bash
 jq -n --arg m "$AITS_MEDIUM_MODEL" --rawfile p /tmp/prompt.txt \
@@ -379,7 +383,7 @@ curl -sS https://api.together.xyz/v1/chat/completions \
   -d @- | jq -r '.choices[0].message.content' > /tmp/together-result.txt
 ```
 
-**High tier (latest Sonnet).** Do the work in the parent, or dispatch a Sonnet subagent with the host's own subagent tool.
+**High steps (latest Sonnet).** Do the work in the parent, or dispatch a Sonnet subagent with the host's own subagent tool. Ultra uses Sonnet for both the draft and the verify step.
 
 ### Parallel subagents
 

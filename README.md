@@ -226,10 +226,9 @@ still depends on the supplied tokenizer matching the target model.
 ## Tiered model routing
 
 `model_router.py` and the *Tiered Delegation* section of `SKILL.md` route
-delegated work to save tokens: high → latest Sonnet, medium → Together, ultra →
-medium and high together (Together drafts, Sonnet verifies), small and image
-generation → GPT luna through the Codex CLI. Override ids with `AITS_HIGH_MODEL`,
-`AITS_MEDIUM_MODEL` (required for medium/ultra), `AITS_SMALL_MODEL`. This
-replaces the separate use-codex skill.
-
-`python delegate.py --kind edit --prompt-file task.txt` runs the routed tier(s) and returns the compacted answer.
+delegated work to save tokens. low → GPT luna (Codex CLI, also image generation);
+medium → two mediums (Together draft + verify); high → medium + high (Together
+draft, latest Sonnet verify); ultra → high + high (Sonnet draft + verify) for very
+large work. Override ids with `AITS_LOW_MODEL`, `AITS_MEDIUM_MODEL` (required for
+medium/high), `AITS_HIGH_MODEL`. `python delegate.py --kind edit --prompt-file task.txt`
+runs the routed tier and returns the compacted answer.

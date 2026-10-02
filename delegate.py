@@ -2,10 +2,10 @@
 
     python delegate.py --kind edit --prompt-file task.txt [--context-file ctx.txt]
 
-small  -> Codex CLI (GPT luna)           needs `codex` on PATH
-medium -> Together chat API              needs TOGETHER_API_KEY, AITS_MEDIUM_MODEL
-high   -> Anthropic Messages API         needs ANTHROPIC_API_KEY
-ultra  -> Together draft, then Sonnet verifies the draft
+low    -> Codex CLI (GPT luna)             needs `codex` on PATH
+medium -> Together draft + Together verify needs TOGETHER_API_KEY, AITS_MEDIUM_MODEL
+high   -> Together draft + Sonnet verify   also needs ANTHROPIC_API_KEY
+ultra  -> Sonnet draft + Sonnet verify     needs ANTHROPIC_API_KEY
 """
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ import urllib.request
 from typing import Callable
 
 from ai_token_saver import compact_text, estimate_tokens
-from model_router import Route, route, verifier
+from model_router import Step, codex_command, route
 
-Runner = Callable[[Route, str], str]
+Runner = Callable[[Step, str], str]
 
 
 def _post(url: str, headers: dict[str, str], body: dict) -> dict:
@@ -37,22 +37,22 @@ def _key(name: str) -> str:
     return value
 
 
-def run_codex(r: Route, prompt: str) -> str:
+def run_codex(r: Step, prompt: str) -> str:
     with tempfile.NamedTemporaryFile("r", suffix=".txt") as out:
-        p = subprocess.run(r.codex_command(out.name), input=prompt, text=True, capture_output=True)
+        p = subprocess.run(codex_command(r, out.name), input=prompt, text=True, capture_output=True)
         if p.returncode:
             raise RuntimeError(f"codex failed: {p.stderr.strip()[:500]}")
         return out.read()
 
 
-def run_together(r: Route, prompt: str) -> str:
+def run_together(r: Step, prompt: str) -> str:
     d = _post("https://api.together.xyz/v1/chat/completions",
               {"Authorization": f"Bearer {_key('TOGETHER_API_KEY')}"},
               {"model": r.model, "messages": [{"role": "user", "content": prompt}]})
     return d["choices"][0]["message"]["content"]
 
 
-def run_anthropic(r: Route, prompt: str) -> str:
+def run_anthropic(r: Step, prompt: str) -> str:
     d = _post("https://api.anthropic.com/v1/messages",
               {"x-api-key": _key("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01"},
               {"model": r.model, "max_tokens": 8192, "messages": [{"role": "user", "content": prompt}]})
@@ -64,21 +64,19 @@ RUNNERS: dict[str, Runner] = {"codex": run_codex, "together": run_together, "ant
 
 def delegate(kind: str, prompt: str, context: str = "", *, runners: dict[str, Runner] | None = None,
              env: dict[str, str] | None = None) -> dict:
-    """Compact context, run the routed tier(s), compact the answer."""
+    """Compact context, run the routed draft (+ verify) steps, compact the answer."""
     runners = runners or RUNNERS
     r = route(kind, tokens=estimate_tokens(prompt + context), env=env)
     full = compact_text(f"{context}\n\n{prompt}" if context else prompt)
-    if r.tier == "ultra":
-        draft = runners["together"](r, full)
-        v = verifier(r, env)
-        sonnet = route("plan", env=env)
-        out = runners["anthropic"](sonnet, f"Verify and correct this draft. Return the final answer only.\n\nTASK:\n{full}\n\nDRAFT:\n{draft}")
-        model = f"{r.model}+{v}"
-    else:
-        out = runners[r.provider](r, full)
-        model = r.model
+    first = r.steps[0]
+    out = runners[first.provider](first, full)
+    if r.paired:
+        second = r.steps[1]
+        out = runners[second.provider](
+            second, f"Verify and correct this draft. Return the final answer only.\n\nTASK:\n{full}\n\nDRAFT:\n{out}")
     out = compact_text(out)
-    return {"tier": r.tier, "model": model, "tokens_in": estimate_tokens(full), "tokens_out": estimate_tokens(out), "result": out}
+    return {"tier": r.tier, "models": [s.model for s in r.steps], "tokens_in": estimate_tokens(full),
+            "tokens_out": estimate_tokens(out), "result": out}
 
 
 def main(argv: list[str] | None = None) -> int:

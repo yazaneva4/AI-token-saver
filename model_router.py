@@ -2,6 +2,7 @@
 
 high   -> latest Sonnet (the parent Claude / Anthropic API)
 medium -> Together (OpenAI-compatible chat API)
+ultra  -> medium and high together: Together drafts, Sonnet verifies
 small  -> GPT "luna" via the Codex CLI (also used for image generation)
 
 Model ids are defaults only; override them with environment variables
@@ -14,13 +15,14 @@ from dataclasses import dataclass
 import os
 import shlex
 
-HIGH, MEDIUM, SMALL = "high", "medium", "small"
+HIGH, MEDIUM, ULTRA, SMALL = "high", "medium", "ultra", "small"
 SMALL_KINDS = {"search", "lookup", "fetch", "rename", "format", "summary", "image", "image_gen"}
 MEDIUM_KINDS = {"edit", "implement", "refactor", "review", "tests", "docs", "analysis"}
+ULTRA_KINDS = {"critical", "release", "migration", "large_feature"}
 HIGH_KINDS = {"architecture", "plan", "debug", "security", "multi_file_refactor", "research"}
-_DEFAULTS = {HIGH: "claude-sonnet-5-5", MEDIUM: "", SMALL: "luna"}
-_ENV = {HIGH: "AITS_HIGH_MODEL", MEDIUM: "AITS_MEDIUM_MODEL", SMALL: "AITS_SMALL_MODEL"}
-_PROVIDER = {HIGH: "anthropic", MEDIUM: "together", SMALL: "codex"}
+_DEFAULTS = {HIGH: "claude-sonnet-5-5", MEDIUM: "", ULTRA: "", SMALL: "luna"}
+_ENV = {HIGH: "AITS_HIGH_MODEL", MEDIUM: "AITS_MEDIUM_MODEL", ULTRA: "AITS_MEDIUM_MODEL", SMALL: "AITS_SMALL_MODEL"}
+_PROVIDER = {HIGH: "anthropic", MEDIUM: "together", ULTRA: "together+anthropic", SMALL: "codex"}
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,8 @@ def classify(kind: str, *, tokens: int = 0) -> str:
     k = kind.strip().lower().replace("-", "_").replace(" ", "_")
     if k in SMALL_KINDS:
         return SMALL
+    if k in ULTRA_KINDS:
+        return ULTRA
     if k in HIGH_KINDS:
         return HIGH
     if k in MEDIUM_KINDS:
@@ -59,6 +63,12 @@ def route(kind: str, *, tokens: int = 0, env: dict[str, str] | None = None) -> R
     env = os.environ if env is None else env
     tier = classify(kind, tokens=tokens)
     model = env.get(_ENV[tier]) or _DEFAULTS[tier]
-    if tier == MEDIUM and not model:
+    if tier in (MEDIUM, ULTRA) and not model:
         raise ValueError("set AITS_MEDIUM_MODEL to a Together model id for medium work")
     return Route(tier, _PROVIDER[tier], model, "low" if tier == SMALL else None)
+
+
+def verifier(r: Route, env: dict[str, str] | None = None) -> str | None:
+    """Model that checks the draft when tiers work together (ultra only)."""
+    env = os.environ if env is None else env
+    return (env.get(_ENV[HIGH]) or _DEFAULTS[HIGH]) if r.tier == ULTRA else None

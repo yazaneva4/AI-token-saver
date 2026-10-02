@@ -225,7 +225,9 @@ still depends on the supplied tokenizer matching the target model.
 
 ## Tiered model routing
 
-`model_router.py` plus `skill/use-codex.md` route delegated work: high → latest
-Sonnet, medium → Together, small and image generation → GPT luna through the
-Codex CLI. Override ids with `AITS_HIGH_MODEL`, `AITS_MEDIUM_MODEL` (required),
-`AITS_SMALL_MODEL`.
+`model_router.py` and the *Tiered Delegation* section of `SKILL.md` route
+delegated work to save tokens: high → latest Sonnet, medium → Together, ultra →
+medium and high together (Together drafts, Sonnet verifies), small and image
+generation → GPT luna through the Codex CLI. Override ids with `AITS_HIGH_MODEL`,
+`AITS_MEDIUM_MODEL` (required for medium/ultra), `AITS_SMALL_MODEL`. This
+replaces the separate use-codex skill.

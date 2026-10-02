@@ -1,5 +1,5 @@
 import pytest
-from model_router import route, classify
+from model_router import route, classify, verifier
 
 
 def test_tiers():
@@ -25,3 +25,11 @@ def test_medium_needs_model_and_codex_only():
         route("edit", env={})
     with pytest.raises(ValueError):
         route("plan", env={}).codex_command("x")
+
+
+def test_ultra_works_together():
+    env = {"AITS_MEDIUM_MODEL": "m/x"}
+    r = route("release", env=env)
+    assert r.tier == "ultra" and r.model == "m/x"
+    assert verifier(r, env) == "claude-sonnet-5-5"
+    assert verifier(route("edit", env=env), env) is None

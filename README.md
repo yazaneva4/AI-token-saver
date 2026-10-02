@@ -222,3 +222,10 @@ guaranty of secret detection; do not rely on it as a credential manager.
 Early / experimental implementation. Token counting is approximate unless a trusted
 model-specific tokenizer or token-counting function is supplied. Exact accounting
 still depends on the supplied tokenizer matching the target model.
+
+## Tiered model routing
+
+`model_router.py` plus `skill/use-codex.md` route delegated work: high → latest
+Sonnet, medium → Together, small and image generation → GPT luna through the
+Codex CLI. Override ids with `AITS_HIGH_MODEL`, `AITS_MEDIUM_MODEL` (required),
+`AITS_SMALL_MODEL`.

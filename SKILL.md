@@ -297,3 +297,12 @@ A valid fix requires:
 Never claim that a remote provider quota, billing limit, or server-side rate limit
 was changed by this skill. The saver can reduce unnecessary work and context, but
 provider-side limits remain controlled by the provider.
+
+## Tiered Delegation
+
+For context-heavy or delegable work, route by size using `model_router.py` and
+`skill/use-codex.md`: high work stays on the latest Sonnet, medium work goes to
+Together, small work and image generation go to GPT luna via the Codex CLI.
+Model ids are overridable with `AITS_HIGH_MODEL`, `AITS_MEDIUM_MODEL`,
+`AITS_SMALL_MODEL`. Subagents receive only the compacted context needed for the
+task; credentials are never included in prompts or saved context.

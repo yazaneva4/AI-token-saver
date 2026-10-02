@@ -1,15 +1,15 @@
-"""Tiered model routing for delegated work.
+"""Tiered routing between GPT luna (Codex CLI) and Sonnet (Claude Code CLI).
 
-Every tier is a draft step followed (except low) by a verify step:
+Both run through the user's own subscriptions via their CLIs; no API keys.
+Paired tiers have luna draft and Sonnet verify, each at the effort shown.
 
-low    -> GPT "luna" via the Codex CLI (also image generation)
-medium -> two mediums together: Together drafts, a second Together pass verifies
-high   -> medium + high: Together drafts, latest Sonnet verifies
-ultra  -> high + high: latest Sonnet drafts, latest Sonnet verifies
-         (very large work, best effort)
+low    -> luna(low)
+medium -> luna(medium) + sonnet(medium)
+high   -> luna(medium) + sonnet(high)
+ultra  -> luna(high)   + sonnet(high)     very large work, best effort
 
-Model ids are defaults only; override with AITS_LOW_MODEL, AITS_MEDIUM_MODEL,
-AITS_HIGH_MODEL because provider model names change.
+Override ids with AITS_LUNA_MODEL (default "luna") and AITS_SONNET_MODEL
+(default "sonnet", which the Claude CLI resolves to the latest Sonnet).
 """
 from __future__ import annotations
 
@@ -22,18 +22,20 @@ LOW_KINDS = {"search", "lookup", "fetch", "rename", "format", "summary", "image"
 MEDIUM_KINDS = {"edit", "implement", "tests", "docs", "analysis", "review"}
 HIGH_KINDS = {"architecture", "plan", "debug", "security", "multi_file_refactor", "refactor", "research"}
 ULTRA_KINDS = {"critical", "release", "migration", "large_feature", "large_codebase"}
-_DEFAULTS = {"low": "luna", "medium": "", "high": "claude-sonnet-5-5"}
-_ENV = {"low": "AITS_LOW_MODEL", "medium": "AITS_MEDIUM_MODEL", "high": "AITS_HIGH_MODEL"}
-_PROVIDER = {"low": "codex", "medium": "together", "high": "anthropic"}
-# tier -> (draft level, verify level or None)
-_PLAN = {LOW: ("low", None), MEDIUM: ("medium", "medium"), HIGH: ("medium", "high"), ULTRA: ("high", "high")}
+_PLAN = {
+    LOW: (("codex", "low"),),
+    MEDIUM: (("codex", "medium"), ("claude", "medium")),
+    HIGH: (("codex", "medium"), ("claude", "high")),
+    ULTRA: (("codex", "high"), ("claude", "high")),
+}
+_MODEL = {"codex": ("AITS_LUNA_MODEL", "luna"), "claude": ("AITS_SONNET_MODEL", "sonnet")}
 
 
 @dataclass(frozen=True)
 class Step:
-    provider: str
+    cli: str  # "codex" or "claude"
     model: str
-    reasoning: str | None = None
+    effort: str
 
 
 @dataclass(frozen=True)
@@ -42,30 +44,23 @@ class Route:
     steps: tuple[Step, ...]
 
     @property
-    def provider(self) -> str:
-        return self.steps[0].provider
-
-    @property
-    def model(self) -> str:
-        return self.steps[0].model
-
-    @property
     def paired(self) -> bool:
         return len(self.steps) == 2
 
 
-def codex_command(step: Step, output_file: str) -> list[str]:
-    """Argv for a Codex CLI subagent; prompt goes on stdin (``-``)."""
-    if step.provider != "codex":
-        raise ValueError(f"{step.provider} step is not run through the Codex CLI")
-    cmd = ["codex", "exec", "--yolo", "--skip-git-repo-check", "-m", step.model]
-    if step.reasoning:
-        cmd += ["-c", f'model_reasoning_effort="{step.reasoning}"']
-    return cmd + ["-o", output_file, "-"]
+def command(step: Step, output_file: str | None = None) -> list[str]:
+    """Argv for one subagent; the prompt goes on stdin."""
+    if step.cli == "codex":
+        cmd = ["codex", "exec", "--yolo", "--skip-git-repo-check", "-m", step.model,
+               "-c", f'model_reasoning_effort="{step.effort}"']
+        return cmd + (["-o", output_file] if output_file else []) + ["-"]
+    if step.cli == "claude":
+        return ["claude", "-p", "--model", step.model, "--effort", step.effort]
+    raise ValueError(f"unknown cli {step.cli!r}")
 
 
-def shell(step: Step, output_file: str) -> str:
-    return " ".join(shlex.quote(p) for p in codex_command(step, output_file))
+def shell(step: Step, output_file: str | None = None) -> str:
+    return " ".join(shlex.quote(p) for p in command(step, output_file))
 
 
 def classify(kind: str, *, tokens: int = 0) -> str:
@@ -79,16 +74,11 @@ def classify(kind: str, *, tokens: int = 0) -> str:
     return LOW if tokens and tokens < 1500 else HIGH if tokens > 20000 else MEDIUM
 
 
-def _step(level: str, env) -> Step:
-    model = env.get(_ENV[level]) or _DEFAULTS[level]
-    if not model:
-        raise ValueError(f"set {_ENV[level]} to a Together model id for medium work")
-    return Step(_PROVIDER[level], model, "low" if level == "low" else None)
-
-
 def route(kind: str, *, tokens: int = 0, env: dict[str, str] | None = None) -> Route:
     env = os.environ if env is None else env
     tier = classify(kind, tokens=tokens)
-    draft, verify = _PLAN[tier]
-    steps = (_step(draft, env),) + ((_step(verify, env),) if verify else ())
-    return Route(tier, steps)
+    steps = []
+    for cli, effort in _PLAN[tier]:
+        var, default = _MODEL[cli]
+        steps.append(Step(cli, env.get(var) or default, effort))
+    return Route(tier, tuple(steps))

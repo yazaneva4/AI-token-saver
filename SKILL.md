@@ -300,118 +300,70 @@ provider-side limits remain controlled by the provider.
 
 ## Tiered Delegation (token saving)
 
-This skill replaces the standalone use-codex skill. Delegate context-heavy work to
-subagents so the parent context stays small, and route by size with
-`model_router.py`. Model ids are overridable with `AITS_HIGH_MODEL`,
-`AITS_MEDIUM_MODEL` (required, no default), `AITS_SMALL_MODEL`. Subagents get
-only the compacted context needed; credentials never enter prompts or saved context.
+For desktop apps and CLIs such as Claude Code and Codex. Delegate context-heavy
+work to subagents so the parent context stays small. Everything runs through the
+user's own logins via the `claude` and `codex` CLIs; **no API keys are used or
+needed**. This replaces the standalone use-codex skill.
 
+**Golden Rule:** if the task plus intermediate work would add 3,000+ tokens to the
+parent context, use a subagent.
 
+### Model tiers
 
-Spawn autonomous subagents to offload context-heavy work. Subagents burn their own tokens and return only their final message, so the parent's context stays clean.
+Two models work together: GPT luna (Codex CLI) drafts, Sonnet (Claude CLI,
+`--model sonnet` = latest) verifies and corrects the draft. Effort per tier:
 
-**Golden Rule:** If task + intermediate work would add 3,000+ tokens to parent context → use a subagent.
+| Tier | Work | luna | Sonnet |
+|------|------|------|--------|
+| low | search, lookup, fetch, rename, formatting, summaries, **image generation** | low | not used |
+| medium | normal edits, implementation, tests, docs, analysis, review | medium | medium |
+| high | architecture, planning, hard debugging, security, multi-file refactors, research | medium | high |
+| ultra | very large work: critical changes, releases, migrations, large features or codebases (any task over ~60k tokens) | high | high |
+
+`model_router.py` implements this: `route(kind, tokens=...)` returns the tier and
+its steps. Override model ids with `AITS_LUNA_MODEL` (default `luna`) and
+`AITS_SONNET_MODEL` (default `sonnet`). When unsure, go one tier up.
 
 ### Automated runner
 
 `python delegate.py --kind <kind> --prompt-file task.txt [--context-file ctx.txt] [--json]`
-compacts the context, routes by tier, runs the draft step (then the verify step
-for paired tiers), compacts the answer and prints it (with `--json`: tier,
-models, tokens in/out). Needs `codex` on PATH for low, `TOGETHER_API_KEY` +
-`AITS_MEDIUM_MODEL` for medium/high, and `ANTHROPIC_API_KEY` for high/ultra.
-Prefer it over hand-written commands.
-
-### Model tiers
-
-Paired tiers run two models together: the first drafts, the second verifies and
-corrects the draft.
-
-| Tier | Work | Models |
-|------|------|--------|
-| low | search, lookup, fetch, rename, formatting, summaries, **image generation** | GPT luna via Codex CLI, `low` reasoning |
-| medium | normal edits, implementation, tests, docs, analysis, review | medium + medium (Together draft, Together verify) |
-| high | architecture, planning, hard debugging, security, multi-file refactors, research | medium + high (Together draft, latest Sonnet verify) |
-| ultra | very large work: critical changes, releases, migrations, large features or codebases (also any task over ~60k tokens) | high + high (latest Sonnet draft, latest Sonnet verify), best effort |
-
-`model_router.py` implements this table: `route(kind, tokens=...)` returns the tier and its steps (provider, model). Override model ids with `AITS_LOW_MODEL`, `AITS_MEDIUM_MODEL`, `AITS_HIGH_MODEL`; provider model names change. `AITS_MEDIUM_MODEL` has no default and must be set for medium and high.
+compacts the context, runs the draft step, then the verify step for paired tiers,
+compacts the answer and prints it (`--json`: tier, steps, tokens in/out). It needs
+the `codex` and `claude` CLIs installed and logged in. Prefer it over hand-written
+commands.
 
 ### Instructions
 
-1. **Clarify intent.** Infer from inline args; ask only if unclear. Buckets: second-opinion review, refactor, plan validation, feature implementation, fresh perspective on a stuck bug, parallel comparison.
-2. **Pick the tier** with `route(...)` using the table above. When unsure, go one tier up.
-3. **Spawn the subagent** with the invocation for that tier (below). Pipe long prompts via stdin.
-4. **Act autonomously while it runs.** Pause only for destructive operations (data loss, external impact, security).
-5. **Monitor, don't fire-and-forget.** Check completion, verify quality, retry on failure. Parallel and sequential subagents are fine.
-6. **Present results, don't dump them.** Summarize in your own words, surface concrete changes, leave the next move to the user. Subagent output is input for your synthesis.
+1. **Clarify intent** from the request; ask only if unclear.
+2. **Pick the tier** with `route(...)`.
+3. **Spawn** with `delegate.py` or the manual commands below. Pipe prompts on stdin.
+4. **Act autonomously while it runs**; pause only for destructive operations.
+5. **Monitor**: check completion, verify quality, retry on failure.
+6. **Present results, don't dump them**: summarize in your own words and leave the next move to the user.
 
 ### Intelligent prompting
 
-Subagents only see what you give them. Always include: **Context**, numbered **Objectives**, **Constraints** (focus / ignore), **Output format**, **Success criteria**.
+Subagents only see what you give them. Always include: **Context**, numbered
+**Objectives**, **Constraints** (focus / ignore), **Output format**, **Success
+criteria**. Name directories, questions and the exact return shape; vague prompts
+produce vague work.
 
-```
-[TASK CONTEXT] You are researching/analyzing/coding [TOPIC].
-[OBJECTIVES] 1. ... 2. ...
-[CONSTRAINTS] - Focus on: ... - Ignore: ...
-[OUTPUT FORMAT] Return: ...
-[SUCCESS CRITERIA] Complete when: ...
-```
-
-Vague prompts ("Research authentication") produce vague work. Name the directories, the questions, and the exact return shape ("Return as a markdown table: method, path, auth, schemas").
-
-### Invocations
-
-**Low tier (Codex CLI, GPT luna).** Pipe the prompt via stdin with `-`; capture output with `-o`:
+### Manual commands
 
 ```bash
-cat <<'EOF' | codex exec --yolo --skip-git-repo-check \
-  -m luna -c 'model_reasoning_effort="low"' \
-  -o /tmp/codex-result.txt -
-[TASK CONTEXT] ...
+# luna (Codex CLI, subscription login)
+cat <<'EOF' | codex exec --yolo --skip-git-repo-check -m luna \
+  -c 'model_reasoning_effort="medium"' -o /tmp/draft.txt -
+[TASK CONTEXT] ... [OBJECTIVES] ... [OUTPUT FORMAT] ...
 EOF
-result=$(cat /tmp/codex-result.txt)
+
+# Sonnet verify (Claude CLI, subscription login)
+{ printf 'Verify and correct this draft. Return the final answer only.\n\nDRAFT:\n'; cat /tmp/draft.txt; } |
+  claude -p --model sonnet --effort high
 ```
 
-Use `--json` instead of `-o` only for machine-parsable output (`jq -r 'select(.event=="turn.completed") | .content'`). For image generation use the same command with a prompt that asks for the image file path as the return value.
-
-**Medium steps (Together).** OpenAI-compatible endpoint; `TOGETHER_API_KEY` stays in the environment, never in prompts or saved context:
-
-```bash
-jq -n --arg m "$AITS_MEDIUM_MODEL" --rawfile p /tmp/prompt.txt \
-  '{model:$m,messages:[{role:"user",content:$p}]}' |
-curl -sS https://api.together.xyz/v1/chat/completions \
-  -H "Authorization: Bearer $TOGETHER_API_KEY" -H 'Content-Type: application/json' \
-  -d @- | jq -r '.choices[0].message.content' > /tmp/together-result.txt
-```
-
-**High steps (latest Sonnet).** Do the work in the parent, or dispatch a Sonnet subagent with the host's own subagent tool. Ultra uses Sonnet for both the draft and the verify step.
-
-### Parallel subagents
-
-Each subagent writes its own output file; `wait`, then read all:
-
-```bash
-cat <<'EOF' | codex exec --yolo --skip-git-repo-check -m luna -c 'model_reasoning_effort="low"' -o /tmp/agent-a.txt - &
-Approach A: ... Return diff + rationale.
-EOF
-cat <<'EOF' | codex exec --yolo --skip-git-repo-check -m luna -c 'model_reasoning_effort="low"' -o /tmp/agent-b.txt - &
-Approach B: ... Return diff + rationale.
-EOF
-wait
-```
-
-Give both the same problem under different framings, then synthesize the better answer in the parent. Tiers can be mixed.
-
-### Sequential subagents
-
-call → read → decide → call. The parent composes each prompt fresh from what just landed. Always use a quoted heredoc (`<<'EOF'`) and `cat` prior output on stdin; never interpolate `$STEP_N` into an unquoted heredoc, because model output often contains backticks and `$()` that bash would execute.
-
-```bash
-{ cat <<'EOF'
-Review the changes summarized below for security holes. Return: issues + line refs.
-
-[PRIOR WORK]
-EOF
-cat /tmp/codex-step-1.txt; } | codex exec --yolo --skip-git-repo-check -m luna -o /tmp/codex-step-2.txt -
-```
-
-Upgrade the tier for a review or fix pass if the first result was weak.
+Always use quoted heredocs (`<<'EOF'`) and `cat` prior output on stdin; never
+interpolate model output into an unquoted heredoc, since it often contains
+backticks and `$()`. Run independent subagents in parallel with `&` and `wait`,
+each writing its own `-o` file; for multi-step work, read each result and decide
+the next call before dispatching it.

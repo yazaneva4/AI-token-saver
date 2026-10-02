@@ -1,11 +1,9 @@
 import pytest
-from model_router import route, classify, codex_command
-
-ENV = {"AITS_MEDIUM_MODEL": "m/x"}
+from model_router import route, classify, command, shell
 
 
-def pair(kind, env=ENV):
-    return [(s.provider, s.model) for s in route(kind, env=env).steps]
+def plan(kind, env=None):
+    return [(s.cli, s.effort) for s in route(kind, env=env or {}).steps]
 
 
 def test_tiers():
@@ -16,22 +14,24 @@ def test_tiers():
     assert classify("mystery", tokens=90000) == "ultra"
 
 
-def test_step_composition():
-    assert pair("edit") == [("together", "m/x")] * 2
-    assert pair("plan") == [("together", "m/x"), ("anthropic", "claude-sonnet-5-5")]
-    assert pair("release") == [("anthropic", "claude-sonnet-5-5")] * 2
-    assert pair("image") == [("codex", "luna")]
+def test_pairs():
+    assert plan("image") == [("codex", "low")]
+    assert plan("edit") == [("codex", "medium"), ("claude", "medium")]
+    assert plan("plan") == [("codex", "medium"), ("claude", "high")]
+    assert plan("release") == [("codex", "high"), ("claude", "high")]
 
 
-def test_overrides_and_codex_command():
-    s = route("image", env={"AITS_LOW_MODEL": "gpt-luna"}).steps[0]
-    assert " ".join(codex_command(s, "/tmp/o.txt")) == (
-        "codex exec --yolo --skip-git-repo-check -m gpt-luna -c model_reasoning_effort=\"low\" -o /tmp/o.txt -")
+def test_commands_and_overrides():
+    env = {"AITS_LUNA_MODEL": "gpt-luna", "AITS_SONNET_MODEL": "claude-sonnet-5-5"}
+    c, s = route("edit", env=env).steps
+    assert shell(c, "/tmp/o.txt") == (
+        "codex exec --yolo --skip-git-repo-check -m gpt-luna "
+        "-c 'model_reasoning_effort=\"medium\"' -o /tmp/o.txt -")
+    assert command(s) == ["claude", "-p", "--model", "claude-sonnet-5-5", "--effort", "medium"]
+    assert command(route("edit", env={}).steps[1])[3] == "sonnet"
 
 
-def test_errors():
+def test_unknown_cli():
+    from model_router import Step
     with pytest.raises(ValueError):
-        route("edit", env={})
-    with pytest.raises(ValueError):
-        codex_command(route("release", env={}).steps[0], "x")
-    assert route("release", env={}).tier == "ultra"  # ultra needs no Together model
+        command(Step("x", "m", "low"))

@@ -1,36 +1,34 @@
 import pytest
-from delegate import delegate, main
-
-ENV = {"AITS_MEDIUM_MODEL": "m/x"}
+from delegate import delegate, main, run_claude
+from model_router import Step
 
 
 def fakes(log):
     def mk(name):
-        def run(r, p):
-            log.append((name, r.model, p))
+        def run(step, p):
+            log.append((name, step.effort, p))
             return f"{name} answer\n\n\n{name} answer"
         return run
-    return {k: mk(k) for k in ("codex", "together", "anthropic")}
+    return {k: mk(k) for k in ("codex", "claude")}
 
 
-def test_low_goes_to_codex_and_compacts():
+def test_low_is_luna_only_and_compacts():
     log = []
-    res = delegate("image", "make a logo", runners=fakes(log), env=ENV)
+    res = delegate("image", "make a logo", runners=fakes(log))
     assert [l[0] for l in log] == ["codex"] and res["tier"] == "low"
     assert res["result"] == "codex answer"
 
 
-def test_pairs():
-    for kind, want in (("edit", ["together"] * 2), ("plan", ["together", "anthropic"]),
-                       ("release", ["anthropic"] * 2)):
+def test_pairs_draft_then_verify():
+    for kind, efforts in (("edit", ["medium", "medium"]), ("plan", ["medium", "high"]),
+                          ("release", ["high", "high"])):
         log = []
-        res = delegate(kind, "do it", runners=fakes(log), env=ENV)
-        assert [l[0] for l in log] == want and len(res["models"]) == 2
-        assert log[0][0] + " answer" in log[1][2]
+        res = delegate(kind, "do it", runners=fakes(log))
+        assert [l[0] for l in log] == ["codex", "claude"] and [l[1] for l in log] == efforts
+        assert "codex answer" in log[1][2] and len(res["steps"]) == 2
 
 
-def test_missing_medium_model_and_cli(tmp_path, capsys):
+def test_missing_cli_is_clean_error(tmp_path, monkeypatch):
     p = tmp_path / "p.txt"; p.write_text("hi")
-    with pytest.raises(ValueError):
-        delegate("edit", "x", runners=fakes([]), env={})
-    assert main(["--kind", "edit", "--prompt-file", str(p)]) == 1
+    monkeypatch.setenv("PATH", "")
+    assert main(["--kind", "image", "--prompt-file", str(p)]) == 1

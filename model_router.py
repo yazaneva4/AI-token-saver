@@ -1,7 +1,8 @@
-"""Subscription-backed tier routing for Codex/GPT and Claude/Sonnet CLIs.
+"""Subscription-backed routing for Codex/GPT-6 Luna and Claude/Sonnet.
 
 All calls use the user's signed-in subscriptions; no API keys are used.
-low: GPT Luna; medium: GPT; high: latest Sonnet; ultra: GPT drafts, Sonnet verifies.
+low: latest Sonnet at low effort; medium: GPT-6 Luna at medium effort;
+high: latest Sonnet at high effort; ultra: both with medium/high split by task.
 """
 from __future__ import annotations
 
@@ -14,12 +15,10 @@ LOW_KINDS = {"search", "lookup", "fetch", "rename", "format", "summary", "image"
 MEDIUM_KINDS = {"edit", "implement", "tests", "docs", "analysis", "review"}
 HIGH_KINDS = {"architecture", "plan", "debug", "security", "multi_file_refactor", "refactor", "research"}
 ULTRA_KINDS = {"critical", "release", "migration", "large_feature", "large_codebase"}
-_PLAN = {
-    LOW: (("codex", "low"),),
-    MEDIUM: (("codex", "medium"),),
-    HIGH: (("claude", "high"),),
-    ULTRA: (("codex", "high"), ("claude", "high")),
-}
+# For very large feature/codebase work, GPT does the heavier first pass.
+# For critical fixes, releases, migrations, and size-based ultra tasks,
+# Sonnet does the heavier verification pass.
+_ULTRA_GPT_HIGH = {"large_feature", "large_codebase"}
 
 
 @dataclass(frozen=True)
@@ -41,7 +40,6 @@ class Route:
 
 def _model(cli: str, env: dict[str, str]) -> str:
     if cli == "codex":
-        # Keep the previous override working while making the GPT role explicit.
         return env.get("AITS_GPT_MODEL") or env.get("AITS_LUNA_MODEL") or "luna"
     if cli == "claude":
         return env.get("AITS_SONNET_MODEL") or "sonnet"
@@ -74,8 +72,24 @@ def classify(kind: str, *, tokens: int = 0) -> str:
     return LOW if tokens and tokens < 1500 else HIGH if tokens > 20000 else MEDIUM
 
 
+def _ultra_efforts(kind: str) -> tuple[tuple[str, str], tuple[str, str]]:
+    """Use both agents, assigning the higher effort to the task's heavier pass."""
+    k = kind.strip().lower().replace("-", "_").replace(" ", "_")
+    if k in _ULTRA_GPT_HIGH:
+        return (("codex", "high"), ("claude", "medium"))
+    return (("codex", "medium"), ("claude", "high"))
+
+
 def route(kind: str, *, tokens: int = 0, env: dict[str, str] | None = None) -> Route:
     env = os.environ if env is None else env
     tier = classify(kind, tokens=tokens)
-    steps = tuple(Step(cli, _model(cli, env), effort) for cli, effort in _PLAN[tier])
+    if tier == LOW:
+        plan = (("claude", "low"),)
+    elif tier == MEDIUM:
+        plan = (("codex", "medium"),)
+    elif tier == HIGH:
+        plan = (("claude", "high"),)
+    else:
+        plan = _ultra_efforts(kind)
+    steps = tuple(Step(cli, _model(cli, env), effort) for cli, effort in plan)
     return Route(tier, steps)

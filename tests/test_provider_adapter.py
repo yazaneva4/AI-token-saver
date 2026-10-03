@@ -58,6 +58,7 @@ def test_prepare_request_compacts_context_before_provider_call_without_persistin
     assert prepared.fingerprint
     assert "PROJECT: OpenSpark" in prepared.context
     assert prepared.context.count("Use provider-neutral adapters") == 1
+    assert "OUTPUT STYLE: Answer directly." in prepared.render()
     assert prepared.render().endswith("USER REQUEST:\nImplement the next routing step")
     assert not path.exists(), "preparation must not persist state before provider success"
 
@@ -68,7 +69,8 @@ def test_prepare_request_does_not_change_request_or_call_provider():
     prepared = adapter.prepare_request({"project": "Demo"}, request)
 
     assert prepared.request == request
-    assert prepared.render() == "PROJECT: Demo\n\nUSER REQUEST:\nKeep this exact request."
+    assert prepared.render().startswith("OUTPUT STYLE: Answer directly.")
+    assert prepared.render().endswith("USER REQUEST:\nKeep this exact request.")
 
 
 def test_save_after_response_persists_only_after_success(tmp_path):

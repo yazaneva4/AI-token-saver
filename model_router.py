@@ -3,6 +3,7 @@
 All calls use the user's signed-in subscriptions; no API keys are used.
 low: latest Sonnet at low effort; medium: GPT-6 Luna at medium effort;
 high: latest Sonnet at high effort; ultra: both with medium/high split by task.
+Image generation uses GPT-6 Luna at low effort.
 """
 from __future__ import annotations
 
@@ -11,7 +12,8 @@ import os
 import shlex
 
 LOW, MEDIUM, HIGH, ULTRA = "low", "medium", "high", "ultra"
-LOW_KINDS = {"search", "lookup", "fetch", "rename", "format", "summary", "image", "image_gen"}
+IMAGE_KINDS = {"image", "image_gen"}
+LOW_KINDS = {"search", "lookup", "fetch", "rename", "format", "summary", *IMAGE_KINDS}
 MEDIUM_KINDS = {"edit", "implement", "tests", "docs", "analysis", "review"}
 HIGH_KINDS = {"architecture", "plan", "debug", "security", "multi_file_refactor", "refactor", "research"}
 ULTRA_KINDS = {"critical", "release", "migration", "large_feature", "large_codebase"}
@@ -83,7 +85,10 @@ def _ultra_efforts(kind: str) -> tuple[tuple[str, str], tuple[str, str]]:
 def route(kind: str, *, tokens: int = 0, env: dict[str, str] | None = None) -> Route:
     env = os.environ if env is None else env
     tier = classify(kind, tokens=tokens)
-    if tier == LOW:
+    k = kind.strip().lower().replace("-", "_").replace(" ", "_")
+    if tier == LOW and k in IMAGE_KINDS:
+        plan = (("codex", "low"),)
+    elif tier == LOW:
         plan = (("claude", "low"),)
     elif tier == MEDIUM:
         plan = (("codex", "medium"),)

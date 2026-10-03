@@ -249,11 +249,11 @@ still depends on the supplied tokenizer matching the target model.
 
 | Tier | Tasks | Route |
 |---|---|---|
-| Low | Search, lookup, formatting, simple summaries | Latest GPT Luna via Codex, low effort |
-| Medium | Normal edits, implementation, tests, docs, analysis | GPT via Codex, medium effort |
+| Low | Search, lookup, formatting, simple summaries | Latest Sonnet via Claude CLI, low effort |
+| Medium | Normal edits, implementation, tests, docs, analysis | GPT-6 Luna via Codex, medium effort |
 | High | Architecture, hard debugging, security, research | Latest Sonnet via Claude CLI, high effort |
-| Ultra | Critical work, releases, migrations, large codebases | GPT via Codex drafts; latest Sonnet via Claude CLI verifies and corrects |
+| Ultra | Critical work, releases, migrations, large codebases | GPT-6 Luna and latest Sonnet work together; one at medium effort, the other at high, depending on task |
 
-Image-generation tasks route to GPT Luna at low effort. This requires image-generation capability in the host environment; the CLI route alone does not add an image tool.
+Regular low-tier tasks route to Sonnet at low effort. Image-generation tasks are an exception and route to GPT-6 Luna at low effort. This requires image-generation capability in the host environment; the CLI route alone does not add an image tool.
 
-Set `AITS_GPT_MODEL` and `AITS_SONNET_MODEL` to override model aliases. `AITS_LUNA_MODEL` remains a legacy fallback for Codex. Defaults are `luna` and `sonnet`. Use `python delegate.py --kind edit --prompt-file task.txt` to run a routed task. Ultra paired work uses the user's subscriptions through the two CLIs, not API calls. Models, aliases, and subscription limits may change.
+Set `AITS_GPT_MODEL` and `AITS_SONNET_MODEL` to override model aliases. `AITS_LUNA_MODEL` remains a legacy fallback for Codex. Defaults are `luna` (GPT-6 Luna) and `sonnet` (latest Sonnet). Use `python delegate.py --kind edit --prompt-file task.txt` to run a routed task. Ultra effort is task-dependent: large features/codebases use GPT high + Sonnet medium; critical fixes, releases, migrations, and size-based ultra work use GPT medium + Sonnet high. Both use the user's subscriptions through the two CLIs, not API calls. Models, aliases, and subscription limits may change.

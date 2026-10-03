@@ -391,16 +391,16 @@ Choose one route for each task:
 
 | Tier | Work | Subscription-backed worker |
 |---|---|---|
-| low | Search, lookup, fetch, rename, formatting, summaries | Latest GPT Luna through Codex, low effort |
-| medium | Normal edits, implementation, tests, docs, analysis, review | GPT through Codex, medium effort |
+| low | Search, lookup, fetch, rename, formatting, summaries | Latest Sonnet through Claude CLI, low effort |
+| medium | Normal edits, implementation, tests, docs, analysis, review | GPT-6 Luna through Codex, medium effort |
 | high | Architecture, planning, hard debugging, security, multi-file refactors, research | Latest Sonnet through Claude CLI, high effort |
-| ultra | Critical changes, releases, migrations, large features/codebases | GPT via Codex and latest Sonnet via Claude CLI, both high effort; GPT drafts, Sonnet independently verifies and corrects |
+| ultra | Critical changes, releases, migrations, large features/codebases | GPT-6 Luna and latest Sonnet work together; one uses medium effort and the other high, based on task type |
 
-Image-generation tasks use latest GPT Luna via the user's Codex subscription at low
-effort. If an image tool is not available through that subscription, report the
+Image-generation tasks are a low-effort exception: use GPT-6 Luna via the user's
+Codex subscription. Other low-tier tasks use latest Sonnet at low effort. If an image tool is not available through that subscription, report the
 limitation; do not silently switch to an API.
 
-Use `AITS_GPT_MODEL` to override the Codex model (default `luna`); the legacy
+Use `AITS_GPT_MODEL` to override GPT-6 Luna in Codex (default alias `luna`); the legacy
 `AITS_LUNA_MODEL` remains a fallback. Use `AITS_SONNET_MODEL` to override the
 Claude model (default `sonnet`, resolved by Claude CLI as its current Sonnet).
 
@@ -421,10 +421,11 @@ installed and authenticated with the user's subscriptions.
 1. Clarify intent only when needed; select the tier with `route(...)`.
 2. Before delegation, compact and minimize the task context without dropping
    constraints, exact technical facts, or success criteria.
-3. For ultra work, give both agents the same task and relevant context. GPT
-   produces the draft; Sonnet checks it independently, identifies gaps, and
-   returns a corrected result. The parent checks the final output against the
-   user's request.
+3. For ultra work, give both agents the same task and relevant context. Route
+   large features/codebases to GPT high + Sonnet medium; route critical fixes,
+   releases, migrations, and size-based ultra work to GPT medium + Sonnet high.
+   GPT drafts; Sonnet checks independently and corrects. The parent checks the
+   final output against the user's request.
 4. Do not run multiple agents for work that is simpler or cheaper to complete
    directly.
 5. Report the result concisely, with verification status and material limits.
@@ -439,13 +440,17 @@ user specifically authorized a supported secure secret flow.
 ### Manual commands
 
 ```bash
-# GPT Luna via the user's Codex subscription
+# GPT-6 Luna image-generation task via the user's Codex subscription
 cat <<'EOF' | codex exec --yolo --skip-git-repo-check -m luna \
   -c 'model_reasoning_effort="low"' -o /tmp/draft.txt -
 [TASK CONTEXT] ... [OBJECTIVES] ... [OUTPUT FORMAT] ...
 EOF
 
-# Latest Sonnet via the user's Claude subscription
+## Latest Sonnet via the user's Claude subscription (low-tier regular task)
+
+`claude -p --model sonnet --effort low`
+
+## Latest Sonnet verifies ultra work via the user's Claude subscription
 { printf 'Verify and correct this draft. Return the final answer only.\n\nDRAFT:\n'; cat /tmp/draft.txt; } |
   claude -p --model sonnet --effort high
 ```

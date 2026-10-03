@@ -63,6 +63,7 @@ def delegate(kind: str, prompt: str, context: str = "", *, runners: dict[str, Ru
     first = r.steps[0]
     first_prompt = _with_output_saving(full)
     raw_out = runners[first.cli](first, first_prompt)
+    total_input_estimate = estimate_tokens(first_prompt)
     if r.paired:
         second = r.steps[1]
         verification_prompt = (
@@ -70,14 +71,16 @@ def delegate(kind: str, prompt: str, context: str = "", *, runners: dict[str, Ru
             "Return only the final answer.\n\n"
             f"TASK:\n{full}\n\nDRAFT:\n{raw_out}"
         )
-        raw_out = runners[second.cli](second, _with_output_saving(verification_prompt))
+        prepared_verification = _with_output_saving(verification_prompt)
+        total_input_estimate += estimate_tokens(prepared_verification)
+        raw_out = runners[second.cli](second, prepared_verification)
     out = compact_text(raw_out)
     generated_estimate = estimate_tokens(raw_out)
     returned_estimate = estimate_tokens(out)
     return {
         "tier": r.tier,
         "steps": [f"{s.cli}:{s.model}:{s.effort}" for s in r.steps],
-        "tokens_in": estimate_tokens(first_prompt),
+        "tokens_in": total_input_estimate,
         # These are character-based estimates, not provider billing data.
         "tokens_out": returned_estimate,  # backward-compatible returned-text estimate
         "tokens_out_generated_estimate": generated_estimate,

@@ -77,8 +77,9 @@ keeping every fact needed to act correctly.
 - Do not imitate caveman grammar or use invented abbreviations. Save words,
   never meaning.
 
-This is an AI instruction-layer behavior. It does not add a tool-output proxy or
-change the deterministic Python compaction algorithm by itself.
+The subscription-backed `delegate.py` runner also adds concise-output instructions before generation, then compacts repeated lines afterward. The first can steer visible output length; post-generation cleanup cannot reduce tokens already generated. Neither can guarantee a specific reduction.
+
+This is an AI instruction-layer behavior. It does not add a tool-output proxy or change the deterministic Python compaction algorithm by itself.
 
 ## Fast, Idempotent Save Commands
 
@@ -231,9 +232,7 @@ model aliases, and usage limits depend on the provider and may change.
 ### Automated runner
 
 `python delegate.py --kind <kind> --prompt-file task.txt [--context-file ctx.txt] [--json]`
-compacts the context, runs the selected subscription-backed step or GPT draft +
-Sonnet verification for ultra work, compacts the answer, and prints it
-(`--json`: tier, steps, tokens in/out). The `codex` and `claude` CLIs must be
+compacts context, adds concise-output instructions before each subscription-backed model call, then compacts repeated lines in the returned answer. Ultra work uses GPT draft + Sonnet verification. `--json` reports estimated input, generated visible output, and returned output counts; these are approximate character-based estimates, not provider billing data. The after-generation cleanup cannot save generation tokens. The `codex` and `claude` CLIs must be
 installed and authenticated with the user's subscriptions.
 
 ### Instructions

@@ -12,18 +12,19 @@ def fakes(log):
     return {k: mk(k) for k in ("codex", "claude")}
 
 
-def test_low_is_luna_only_and_compacts():
+def test_low_is_sonnet_only_and_compacts():
     log = []
     res = delegate("image", "make a logo", runners=fakes(log))
-    assert [l[0] for l in log] == ["codex"] and res["tier"] == "low"
-    assert res["result"] == "codex answer"
+    assert [l[0] for l in log] == ["claude"] and log[0][1] == "low" and res["tier"] == "low"
+    assert res["result"] == "claude answer"
 
 
 def test_tiers_route_to_requested_subscription_workers():
     for kind, expected_cli, efforts in (
         ("edit", ["codex"], ["medium"]),
         ("plan", ["claude"], ["high"]),
-        ("release", ["codex", "claude"], ["high", "high"]),
+        ("release", ["codex", "claude"], ["medium", "high"]),
+        ("large_feature", ["codex", "claude"], ["high", "medium"]),
     ):
         log = []
         res = delegate(kind, "do it", runners=fakes(log))

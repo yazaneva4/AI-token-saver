@@ -37,7 +37,7 @@ def test_tiers_route_to_requested_subscription_workers():
         res = delegate(kind, "do it", runners=fakes(log))
         assert [entry[0] for entry in log] == expected_cli
         assert [entry[1] for entry in log] == efforts
-        if kind == "release":
+        if kind in {"release", "large_feature"}:
             assert "codex answer" in log[1][2] and len(res["steps"]) == 2
         else:
             assert len(res["steps"]) == 1

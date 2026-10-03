@@ -48,8 +48,8 @@ class PreparedProviderRequest:
         if self.context:
             parts.append(self.context)
         if self.request:
-            parts.append(f"USER REQUEST:\\n{self.request}" if self.context else self.request)
-        return "\\n\\n".join(parts)
+            parts.append(f"USER REQUEST:\n{self.request}" if self.context else self.request)
+        return "\n\n".join(parts)
 
 
 def _provider_state_path(provider: str) -> Path:

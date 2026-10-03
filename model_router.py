@@ -1,15 +1,7 @@
-"""Tiered routing between GPT luna (Codex CLI) and Sonnet (Claude Code CLI).
+"""Subscription-backed tier routing for Codex/GPT and Claude/Sonnet CLIs.
 
-Both run through the user's own subscriptions via their CLIs; no API keys.
-Paired tiers have luna draft and Sonnet verify, each at the effort shown.
-
-low    -> luna(low)
-medium -> luna(medium) + sonnet(medium)
-high   -> luna(medium) + sonnet(high)
-ultra  -> luna(high)   + sonnet(high)     very large work, best effort
-
-Override ids with AITS_LUNA_MODEL (default "luna") and AITS_SONNET_MODEL
-(default "sonnet", which the Claude CLI resolves to the latest Sonnet).
+All calls use the user's signed-in subscriptions; no API keys are used.
+low: GPT Luna; medium: GPT; high: latest Sonnet; ultra: GPT drafts, Sonnet verifies.
 """
 from __future__ import annotations
 
@@ -24,11 +16,10 @@ HIGH_KINDS = {"architecture", "plan", "debug", "security", "multi_file_refactor"
 ULTRA_KINDS = {"critical", "release", "migration", "large_feature", "large_codebase"}
 _PLAN = {
     LOW: (("codex", "low"),),
-    MEDIUM: (("codex", "medium"), ("claude", "medium")),
-    HIGH: (("codex", "medium"), ("claude", "high")),
+    MEDIUM: (("codex", "medium"),),
+    HIGH: (("claude", "high"),),
     ULTRA: (("codex", "high"), ("claude", "high")),
 }
-_MODEL = {"codex": ("AITS_LUNA_MODEL", "luna"), "claude": ("AITS_SONNET_MODEL", "sonnet")}
 
 
 @dataclass(frozen=True)
@@ -48,8 +39,17 @@ class Route:
         return len(self.steps) == 2
 
 
+def _model(cli: str, env: dict[str, str]) -> str:
+    if cli == "codex":
+        # Keep the previous override working while making the GPT role explicit.
+        return env.get("AITS_GPT_MODEL") or env.get("AITS_LUNA_MODEL") or "luna"
+    if cli == "claude":
+        return env.get("AITS_SONNET_MODEL") or "sonnet"
+    raise ValueError(f"unknown cli {cli!r}")
+
+
 def command(step: Step, output_file: str | None = None) -> list[str]:
-    """Argv for one subagent; the prompt goes on stdin."""
+    """Argv for one subscription-backed subagent; prompt goes on stdin."""
     if step.cli == "codex":
         cmd = ["codex", "exec", "--yolo", "--skip-git-repo-check", "-m", step.model,
                "-c", f'model_reasoning_effort="{step.effort}"']
@@ -77,8 +77,5 @@ def classify(kind: str, *, tokens: int = 0) -> str:
 def route(kind: str, *, tokens: int = 0, env: dict[str, str] | None = None) -> Route:
     env = os.environ if env is None else env
     tier = classify(kind, tokens=tokens)
-    steps = []
-    for cli, effort in _PLAN[tier]:
-        var, default = _MODEL[cli]
-        steps.append(Step(cli, env.get(var) or default, effort))
-    return Route(tier, tuple(steps))
+    steps = tuple(Step(cli, _model(cli, env), effort) for cli, effort in _PLAN[tier])
+    return Route(tier, steps)

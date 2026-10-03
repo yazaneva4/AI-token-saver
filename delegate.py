@@ -42,6 +42,17 @@ def run_claude(step: Step, prompt: str) -> str:
 
 RUNNERS: dict[str, Runner] = {"codex": run_codex, "claude": run_claude}
 
+OUTPUT_SAVING_RULES = """OUTPUT RULES:
+- Answer directly; omit filler, repeated context, and unrequested explanations.
+- Follow the user's requested detail and format exactly; never shorten requested code, data, reasoning, or warnings.
+- For completed work, give a brief status and the most useful verification result.
+"""
+
+
+def _with_output_saving(prompt: str) -> str:
+    """Steer generation toward concise answers without deleting requested content."""
+    return f"{OUTPUT_SAVING_RULES}\nTASK:\n{prompt}"
+
 
 def delegate(kind: str, prompt: str, context: str = "", *, runners: dict[str, Runner] | None = None,
              env: dict[str, str] | None = None) -> dict:
@@ -50,14 +61,31 @@ def delegate(kind: str, prompt: str, context: str = "", *, runners: dict[str, Ru
     r = route(kind, tokens=estimate_tokens(prompt + context), env=env)
     full = compact_text(f"{context}\n\n{prompt}" if context else prompt)
     first = r.steps[0]
-    out = runners[first.cli](first, full)
+    first_prompt = _with_output_saving(full)
+    raw_out = runners[first.cli](first, first_prompt)
     if r.paired:
         second = r.steps[1]
-        out = runners[second.cli](
-            second, f"Verify and correct this draft. Return the final answer only.\n\nTASK:\n{full}\n\nDRAFT:\n{out}")
-    out = compact_text(out)
-    return {"tier": r.tier, "steps": [f"{s.cli}:{s.model}:{s.effort}" for s in r.steps],
-            "tokens_in": estimate_tokens(full), "tokens_out": estimate_tokens(out), "result": out}
+        verification_prompt = (
+            "Verify and correct this draft. Follow the user's requested detail and format. "
+            "Return only the final answer.\n\n"
+            f"TASK:\n{full}\n\nDRAFT:\n{raw_out}"
+        )
+        raw_out = runners[second.cli](second, _with_output_saving(verification_prompt))
+    out = compact_text(raw_out)
+    generated_estimate = estimate_tokens(raw_out)
+    returned_estimate = estimate_tokens(out)
+    return {
+        "tier": r.tier,
+        "steps": [f"{s.cli}:{s.model}:{s.effort}" for s in r.steps],
+        "tokens_in": estimate_tokens(first_prompt),
+        # These are character-based estimates, not provider billing data.
+        "tokens_out": returned_estimate,  # backward-compatible returned-text estimate
+        "tokens_out_generated_estimate": generated_estimate,
+        "tokens_out_returned_estimate": returned_estimate,
+        "tokens_removed_after_generation_estimate": max(0, generated_estimate - returned_estimate),
+        "token_count_source": "approximate",
+        "result": out,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:

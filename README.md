@@ -245,7 +245,7 @@ still depends on the supplied tokenizer matching the target model.
 
 ## Tiered subscription routing
 
-`model_router.py` routes through the user's signed-in Codex and Claude CLI subscriptions. It does not require API keys.
+`model_router.py` routes through the user's signed-in Codex and Claude CLI subscriptions. It does not require API keys. The runner asks the selected model for concise output before generation, while preserving any detail or format the user requested. It then removes safe repeated lines from the visible result. Only the pre-generation instruction can reduce generated output; cleanup after generation saves returned text, not provider usage.
 
 | Tier | Tasks | Route |
 |---|---|---|

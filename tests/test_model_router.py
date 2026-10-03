@@ -15,10 +15,11 @@ def test_tiers():
 
 
 def test_subscription_routing():
-    assert plan("image_gen") == [("codex", "low")]
+    assert plan("image_gen") == [("claude", "low")]
     assert plan("edit") == [("codex", "medium")]
     assert plan("plan") == [("claude", "high")]
-    assert plan("release") == [("codex", "high"), ("claude", "high")]
+    assert plan("release") == [("codex", "medium"), ("claude", "high")]
+    assert plan("large_feature") == [("codex", "high"), ("claude", "medium")]
 
 
 def test_model_overrides_and_legacy_luna_alias():
@@ -27,23 +28,21 @@ def test_model_overrides_and_legacy_luna_alias():
     sonnet = route("plan", env=env).steps[0]
     assert gpt.model == "gpt-custom"
     assert sonnet.model == "sonnet-custom"
-    assert route("image_gen", env={}).steps[0].model == "luna"
+    assert route("image_gen", env={}).steps[0].model == "sonnet"
     assert route("edit", env={"AITS_LUNA_MODEL": "legacy-gpt"}).steps[0].model == "legacy-gpt"
 
 
 def test_commands_use_cli_subscriptions():
-    env = {"AITS_GPT_MODEL": "gpt-luna", "AITS_SONNET_MODEL": "claude-sonnet-latest"}
+    env = {"AITS_GPT_MODEL": "gpt-6-luna", "AITS_SONNET_MODEL": "claude-sonnet-latest"}
     gpt = route("edit", env=env).steps[0]
-    sonnet = route("plan", env=env).steps[0]
+    sonnet_low = route("image_gen", env=env).steps[0]
+    sonnet_high = route("plan", env=env).steps[0]
     assert shell(gpt, "/tmp/o.txt") == (
-        "codex exec --yolo --skip-git-repo-check -m gpt-luna "
+        "codex exec --yolo --skip-git-repo-check -m gpt-6-luna "
         "-c 'model_reasoning_effort=\"medium\"' -o /tmp/o.txt -")
-    assert command(sonnet) == [
-        "claude", "-p", "--model", "claude-sonnet-latest", "--effort", "high"
-    ]
-    ultra = route("release", env={})
-    assert ultra.paired
-    assert [s.cli for s in ultra.steps] == ["codex", "claude"]
+    assert command(sonnet_low) == ["claude", "-p", "--model", "claude-sonnet-latest", "--effort", "low"]
+    assert command(sonnet_high) == ["claude", "-p", "--model", "claude-sonnet-latest", "--effort", "high"]
+    assert route("release", env={}).paired
 
 
 def test_unknown_cli():

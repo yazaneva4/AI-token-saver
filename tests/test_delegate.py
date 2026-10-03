@@ -12,11 +12,18 @@ def fakes(log):
     return {k: mk(k) for k in ("codex", "claude")}
 
 
-def test_low_is_sonnet_only_and_compacts():
+def test_low_summary_uses_sonnet_and_compacts():
     log = []
-    res = delegate("image", "make a logo", runners=fakes(log))
-    assert [l[0] for l in log] == ["claude"] and log[0][1] == "low" and res["tier"] == "low"
+    res = delegate("summary", "summarize this", runners=fakes(log))
+    assert [entry[:2] for entry in log] == [("claude", "low")] and res["tier"] == "low"
     assert res["result"] == "claude answer"
+
+
+def test_image_generation_uses_gpt_luna_low():
+    log = []
+    res = delegate("image_gen", "make a logo", runners=fakes(log))
+    assert [entry[:2] for entry in log] == [("codex", "low")] and res["tier"] == "low"
+    assert res["result"] == "codex answer"
 
 
 def test_tiers_route_to_requested_subscription_workers():

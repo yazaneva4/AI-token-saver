@@ -19,13 +19,20 @@ def test_low_is_luna_only_and_compacts():
     assert res["result"] == "codex answer"
 
 
-def test_pairs_draft_then_verify():
-    for kind, efforts in (("edit", ["medium", "medium"]), ("plan", ["medium", "high"]),
-                          ("release", ["high", "high"])):
+def test_tiers_route_to_requested_subscription_workers():
+    for kind, expected_cli, efforts in (
+        ("edit", ["codex"], ["medium"]),
+        ("plan", ["claude"], ["high"]),
+        ("release", ["codex", "claude"], ["high", "high"]),
+    ):
         log = []
         res = delegate(kind, "do it", runners=fakes(log))
-        assert [l[0] for l in log] == ["codex", "claude"] and [l[1] for l in log] == efforts
-        assert "codex answer" in log[1][2] and len(res["steps"]) == 2
+        assert [entry[0] for entry in log] == expected_cli
+        assert [entry[1] for entry in log] == efforts
+        if kind == "release":
+            assert "codex answer" in log[1][2] and len(res["steps"]) == 2
+        else:
+            assert len(res["steps"]) == 1
 
 
 def test_missing_cli_is_clean_error(tmp_path, monkeypatch):

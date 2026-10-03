@@ -89,6 +89,33 @@ They can consume usage and do not themselves reset a provider limit. Never
 claim that these practices guarantee unlimited access or prevent a provider
 limit from being reached.
 
+## Concise Responses and Safe Tool-Output Reduction
+
+Use concise, answer-first language to reduce unnecessary output tokens, while
+keeping every fact needed to act correctly.
+
+- Remove greetings, repeated summaries, filler, and unnecessary explanations.
+- Use short, plain sentences. Clarity wins whenever compression could confuse.
+- Keep negations, conditions, order, warnings, and qualifications explicit.
+- Preserve code, commands, paths, identifiers, numbers, units, API names, and
+  decisive error text exactly. Never rewrite exact technical payloads to save
+  tokens.
+- For tool output, show the smallest useful evidence: decisive errors, changed
+  lines, relevant result fields, and clear status. Do not omit information that
+  affects correctness or a decision.
+- Only integrations that explicitly support source-preserving compaction may
+  shorten logs, diffs, JSON, or search results before model context. Keep the
+  original available locally and provide a stable way to retrieve it. Never
+  claim that the current text compactor performs this transformation.
+- State security warnings and confirmation requests in full, clear sentences.
+  Use plain, complete wording for content persisted outside chat, including
+  code comments, docs, commits, memory, and messages.
+- Do not imitate caveman grammar or use invented abbreviations. Save words,
+  never meaning.
+
+This is an AI instruction-layer behavior. It does not add a tool-output proxy or
+change the deterministic Python compaction algorithm by itself.
+
 ## Command-Only Fast Path
 
 A saver command is an instruction to operate on the host's existing context; the
@@ -352,72 +379,77 @@ Never claim that a remote provider quota, billing limit, or server-side rate
 limit was changed by this skill. The saver can reduce unnecessary work and
 context, but provider-side limits remain controlled by the provider.
 
-## Tiered Delegation (token saving)
+## Tiered Delegation (subscription-backed, no API)
 
-For desktop apps and CLIs such as Claude Code and Codex. Delegate context-heavy
-work to subagents so the parent context stays small. Everything runs through the
-user's own logins via the `claude` and `codex` CLIs; **no API keys are used or
-needed**. This replaces the standalone use-codex skill.
+Use the user's authenticated Codex and Claude CLI subscriptions for delegated
+work. Do not require API keys or send tasks to paid API endpoints. If either CLI
+is unavailable or not signed in, report that clearly and continue with the
+available model where reasonable.
 
-**Golden Rule:** if the task plus intermediate work would add 3,000+ tokens to
-the parent context, use a subagent.
+Delegate context-heavy work when doing so keeps the parent context smaller.
+Choose one route for each task:
 
-### Model tiers
+| Tier | Work | Subscription-backed worker |
+|---|---|---|
+| low | Search, lookup, fetch, rename, formatting, summaries | Latest GPT Luna through Codex, low effort |
+| medium | Normal edits, implementation, tests, docs, analysis, review | GPT through Codex, medium effort |
+| high | Architecture, planning, hard debugging, security, multi-file refactors, research | Latest Sonnet through Claude CLI, high effort |
+| ultra | Critical changes, releases, migrations, large features/codebases | GPT via Codex and latest Sonnet via Claude CLI, both high effort; GPT drafts, Sonnet independently verifies and corrects |
 
-Two models work together: GPT luna (Codex CLI) drafts, Sonnet (Claude CLI,
-`--model sonnet` = latest) verifies and corrects the draft. Effort per tier:
+Image-generation tasks use latest GPT Luna via the user's Codex subscription at low
+effort. If an image tool is not available through that subscription, report the
+limitation; do not silently switch to an API.
 
-| Tier | Work | luna | Sonnet |
-|------|------|------|--------|
-| low | search, lookup, fetch, rename, formatting, summaries, **image generation** | low | not used |
-| medium | normal edits, implementation, tests, docs, analysis, review | medium | medium |
-| high | architecture, planning, hard debugging, security, multi-file refactors, research | medium | high |
-| ultra | very large work: critical changes, releases, migrations, large features or codebases (any task over ~60k tokens) | high | high |
+Use `AITS_GPT_MODEL` to override the Codex model (default `luna`); the legacy
+`AITS_LUNA_MODEL` remains a fallback. Use `AITS_SONNET_MODEL` to override the
+Claude model (default `sonnet`, resolved by Claude CLI as its current Sonnet).
 
-`model_router.py` implements this: `route(kind, tokens=...)` returns the tier and
-its steps. Override model ids with `AITS_LUNA_MODEL` (default `luna`) and
-`AITS_SONNET_MODEL` (default `sonnet`). When unsure, go one tier up.
+The Codex CLI and Claude CLI must use the user's own signed-in subscriptions.
+Never add, request, or expose API keys for this workflow. Subscription availability,
+model aliases, and usage limits depend on the provider and may change.
 
 ### Automated runner
 
 `python delegate.py --kind <kind> --prompt-file task.txt [--context-file ctx.txt] [--json]`
-compacts the context, runs the draft step, then the verify step for paired tiers,
-compacts the answer and prints it (`--json`: tier, steps, tokens in/out). It needs
-the `codex` and `claude` CLIs installed and logged in. Prefer it over hand-written
-commands.
+compacts the context, runs the selected subscription-backed step or GPT draft +
+Sonnet verification for ultra work, compacts the answer, and prints it
+(`--json`: tier, steps, tokens in/out). The `codex` and `claude` CLIs must be
+installed and authenticated with the user's subscriptions.
 
 ### Instructions
 
-1. **Clarify intent** from the request; ask only if unclear.
-2. **Pick the tier** with `route(...)`.
-3. **Spawn** with `delegate.py` or the manual commands below. Pipe prompts on stdin.
-4. **Act autonomously while it runs**; pause only for destructive operations.
-5. **Monitor**: check completion, verify quality, retry on failure.
-6. **Present results, don't dump them**: summarize in your own words and leave the next move to the user.
+1. Clarify intent only when needed; select the tier with `route(...)`.
+2. Before delegation, compact and minimize the task context without dropping
+   constraints, exact technical facts, or success criteria.
+3. For ultra work, give both agents the same task and relevant context. GPT
+   produces the draft; Sonnet checks it independently, identifies gaps, and
+   returns a corrected result. The parent checks the final output against the
+   user's request.
+4. Do not run multiple agents for work that is simpler or cheaper to complete
+   directly.
+5. Report the result concisely, with verification status and material limits.
 
 ### Intelligent prompting
 
-Subagents only see what you give them. Always include: **Context**, numbered
-**Objectives**, **Constraints** (focus / ignore), **Output format**, **Success
-criteria**. Name directories, questions and the exact return shape; vague prompts
-produce vague work.
+Subagents see only the context they receive. Include: **Context**, numbered
+**Objectives**, **Constraints**, **Output format**, and **Success criteria**.
+Name exact files and requested return format. Do not send secrets unless the
+user specifically authorized a supported secure secret flow.
 
 ### Manual commands
 
 ```bash
-# luna (Codex CLI, subscription login)
+# GPT Luna via the user's Codex subscription
 cat <<'EOF' | codex exec --yolo --skip-git-repo-check -m luna \
-  -c 'model_reasoning_effort="medium"' -o /tmp/draft.txt -
+  -c 'model_reasoning_effort="low"' -o /tmp/draft.txt -
 [TASK CONTEXT] ... [OBJECTIVES] ... [OUTPUT FORMAT] ...
 EOF
 
-# Sonnet verify (Claude CLI, subscription login)
+# Latest Sonnet via the user's Claude subscription
 { printf 'Verify and correct this draft. Return the final answer only.\n\nDRAFT:\n'; cat /tmp/draft.txt; } |
   claude -p --model sonnet --effort high
 ```
 
-Always use quoted heredocs (`<<'EOF'`) and `cat` prior output on stdin; never
-interpolate model output into an unquoted heredoc, since it often contains
-backticks and `$()`. Run independent subagents in parallel with `&` and `wait`,
-each writing its own `-o` file; for multi-step work, read each result and decide
-the next call before dispatching it.
+Always use quoted heredocs (`<<'EOF'`) and pass prior output on stdin. Never
+interpolate model output into an unquoted heredoc because it may contain shell
+syntax. The automated runner applies the routed effort for each task.

@@ -11,6 +11,12 @@ from typing import Any, Mapping, Protocol
 from context_saver import ContextSaveResult, ContextSaver
 
 
+OUTPUT_SAVING_INSTRUCTION = (
+    "Answer directly. Be concise by default; follow the requested detail and format, "
+    "preserving all necessary facts."
+)
+
+
 class ContextProvider(Protocol):
     def get_context_state(self) -> Mapping[str, Any]: ...
     def apply_context(self, text: str, *, fingerprint: str) -> None: ...
@@ -38,11 +44,12 @@ class PreparedProviderRequest:
     fingerprint: str
 
     def render(self) -> str:
-        if not self.context:
-            return self.request
-        if not self.request:
-            return self.context
-        return f"{self.context}\n\nUSER REQUEST:\n{self.request}"
+        parts = [f"OUTPUT STYLE: {OUTPUT_SAVING_INSTRUCTION}"]
+        if self.context:
+            parts.append(self.context)
+        if self.request:
+            parts.append(f"USER REQUEST:\\n{self.request}" if self.context else self.request)
+        return "\\n\\n".join(parts)
 
 
 def _provider_state_path(provider: str) -> Path:

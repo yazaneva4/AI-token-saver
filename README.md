@@ -245,7 +245,7 @@ still depends on the supplied tokenizer matching the target model.
 
 ## Tiered subscription routing
 
-`model_router.py` routes through the user's signed-in Codex and Claude CLI subscriptions. It does not require API keys. The runner asks the selected model for concise output before generation, while preserving any detail or format the user requested. It then removes safe repeated lines from the visible result. Only the pre-generation instruction can reduce generated output; cleanup after generation saves returned text, not provider usage.
+`model_router.py` routes through the user's signed-in Codex and Claude CLI subscriptions. It does not require API keys. This routing is only for user-requested sub-agent work. Output-saving behavior is provider-neutral and belongs to the host adapter, not this model-tier router.
 
 | Tier | Tasks | Route |
 |---|---|---|
@@ -256,4 +256,4 @@ still depends on the supplied tokenizer matching the target model.
 
 Regular low-tier tasks route to Sonnet at low effort. Image-generation tasks are an exception and route to GPT-6 Luna at low effort. This requires image-generation capability in the host environment; the CLI route alone does not add an image tool.
 
-Set `AITS_GPT_MODEL` and `AITS_SONNET_MODEL` to override model aliases. `AITS_LUNA_MODEL` remains a legacy fallback for Codex. Defaults are `luna` (GPT-6 Luna) and `sonnet` (latest Sonnet). Use `python delegate.py --kind edit --prompt-file task.txt` to run a routed task; add `--json` for tier, prompt, and visible-output estimates. These estimates use approximate character counting unless a trusted tokenizer is added, and they do not equal provider billing data. Ultra effort is task-dependent: large features/codebases use GPT high + Sonnet medium; critical fixes, releases, migrations, and size-based ultra work use GPT medium + Sonnet high. Both use the user's subscriptions through the two CLIs, not API calls. Models, aliases, and subscription limits may change.
+Set `AITS_GPT_MODEL` and `AITS_SONNET_MODEL` to override model aliases. `AITS_LUNA_MODEL` remains a legacy fallback for Codex. Defaults are `luna` (GPT-6 Luna) and `sonnet` (latest Sonnet). Use `python delegate.py --kind edit --prompt-file task.txt` to run a routed sub-agent task. Ultra effort is task-dependent: large features/codebases use GPT high + Sonnet medium; critical fixes, releases, migrations, and size-based ultra work use GPT medium + Sonnet high. Both use the user's subscriptions through the two CLIs, not API calls. Models, aliases, and subscription limits may change.

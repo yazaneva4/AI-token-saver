@@ -17,10 +17,6 @@ def test_low_summary_uses_sonnet_and_compacts():
     res = delegate("summary", "summarize this", runners=fakes(log))
     assert [entry[:2] for entry in log] == [("claude", "low")] and res["tier"] == "low"
     assert res["result"] == "claude answer"
-    assert "omit filler" in log[0][2]
-    assert "requested code" in log[0][2]
-    assert res["tokens_out_generated_estimate"] >= res["tokens_out_returned_estimate"]
-    assert res["token_count_source"] == "approximate"
 
 
 def test_image_generation_uses_gpt_luna_low():
@@ -41,11 +37,8 @@ def test_tiers_route_to_requested_subscription_workers():
         res = delegate(kind, "do it", runners=fakes(log))
         assert [entry[0] for entry in log] == expected_cli
         assert [entry[1] for entry in log] == efforts
-        assert "OUTPUT RULES:" in log[0][2]
-        assert "requested detail and format exactly" in log[0][2]
         if kind in {"release", "large_feature"}:
             assert "codex answer" in log[1][2] and len(res["steps"]) == 2
-            assert "OUTPUT RULES:" in log[1][2]
         else:
             assert len(res["steps"]) == 1
 

@@ -39,6 +39,56 @@ information merely to reach a percentage.
     perform little or no additional work and must not recursively process its own
     generated output.
 
+## Usage-Efficient Interaction Rules
+
+Use these practices to reduce avoidable context and provider usage. They guide
+the host assistant; they do not change provider quotas, billing, or reset times.
+
+1. **Revise before sending when practical.** Put corrections into the original
+   request before submitting it, rather than sending several avoidable
+   corrections. If a follow-up is needed, send it; never sacrifice clarity to
+   avoid one.
+2. **Start a fresh chat when the task changes or old context stops helping.**
+   Carry over a compact, accurate handoff. Message counts such as 15–20 are
+   only a rough reminder to review context, not a universal cutoff.
+3. **Batch related questions and deliverables** into one clear request when that
+   makes the answer easier to produce. Keep unrelated tasks separate when
+   mixing them would cause confusion or rework.
+4. **Measure usage when possible.** Prefer the provider's usage display or a
+   trusted model-specific tokenizer. Label character- or word-based estimates
+   as approximate; never present them as exact billing or quota accounting.
+5. **Reuse recurring project files.** Store frequently used source files in an
+   appropriate project/workspace and refer back to them instead of repeatedly
+   uploading or pasting copies. Project caching and retrieval behavior vary by
+   provider, so do not promise that reuse makes a file free or avoids all
+   reprocessing.
+6. **Set stable preferences once** in the host's supported instructions or
+   project settings. Avoid repeating boilerplate in every request, while keeping
+   task-specific requirements in the task itself.
+7. **Enable tools and features only when useful.** Unneeded search, connectors,
+   extended modes, and other tool descriptions or calls may add overhead.
+   Keep any feature required for accuracy, accessibility, or safety enabled.
+8. **Match model effort to the task.** Use a lighter/cheaper model for simple
+   tasks when it is adequate; reserve more capable models for work that needs
+   them. Model names, prices, and relative costs are provider-specific and can
+   change.
+9. **Plan around the provider's actual usage windows.** Check its current usage
+   panel and reset rules, then spread heavy work where that helps. A rolling
+   window or shared quota across apps applies only when the provider documents
+   it; the saver cannot reset or extend it.
+10. **Treat off-peak advice as provider-specific.** Use it only when current
+    provider information supports a real benefit; do not invent peak-hour
+    schedules or promise higher limits or performance.
+11. **Keep paid overage off unless the user explicitly chooses it.** If the
+    provider offers pay-as-you-go usage, explain that it may incur charges and
+    rely on the provider's spending controls. Never enable overage or raise a
+    spending cap on the user's behalf.
+
+Do not schedule keep-alive pings or cron prompts as a token-saving technique.
+They can consume usage and do not themselves reset a provider limit. Never
+claim that these practices guarantee unlimited access or prevent a provider
+limit from being reached.
+
 ## Command-Only Fast Path
 
 A saver command is an instruction to operate on the host's existing context; the
@@ -54,8 +104,8 @@ For `/ai-token-saver`, `/ai-usage-saver`, `/save`, and `/save-all`:
 4. Do not recursively process the skill's own instructions as user context.
 5. If no host context is available, do not invent one; return a minimal
    acknowledgement or report that the host integration supplied no saveable state.
-6. If the host exposes a local persistent fingerprint, check it before doing any
-   compaction or external work.
+6. If the host exposes a local persistent fingerprint, check it before doing
+   any compaction or external work.
 
 This prevents a host integration from accidentally turning repeated command
 invocations or the skill definition itself into ever-growing saved context.
@@ -146,21 +196,22 @@ Provider names are sanitized before becoming filenames. Never put credentials,
 conversation contents, or raw prompts into the fingerprint state file; it should
 contain only the minimum metadata needed to detect unchanged state.
 
-The persistent lock records only a process id and random lock token. A live owner
-is never considered stale merely because the operation is taking longer than the
-normal timeout. A crashed owner can be recovered safely; lock release also checks
-the token so one process cannot accidentally delete another process's lock.
+The persistent lock records only a process id and random lock token. A live
+owner is never considered stale merely because the operation is taking longer
+than the normal timeout. A crashed owner can be recovered safely; lock release
+also checks the token so one process cannot accidentally delete another
+process's lock.
 
 ### Fast-path invariant
 
-The unchanged-context check MUST be a fast local operation. It MUST NOT require a
-network request, model invocation, browser action, repository operation, or other
-remote service call.
+The unchanged-context check MUST be a fast local operation. It MUST NOT require
+a network request, model invocation, browser action, repository operation, or
+other remote service call.
 
-When the host has a local code/runtime integration, that integration MUST perform
-this check before invoking any model, tokenizer, browser, repository, or other
-remote capability. The skill must not ask another AI model to decide whether the
-context is unchanged.
+When the host has a local code/runtime integration, that integration MUST
+perform this check before invoking any model, tokenizer, browser, repository,
+or other remote capability. The skill must not ask another AI model to decide
+whether the context is unchanged.
 
 For unchanged input, the expected path is:
 
@@ -170,8 +221,8 @@ For changed input, the expected path is:
 
 `read fingerprint → compare → compact changed state → apply changed context → persist fingerprint`
 
-The provider adapter uses transactional host application so a failed `apply_context`
-must not mark the new fingerprint as completed.
+The provider adapter uses transactional host application so a failed
+`apply_context` must not mark the new fingerprint as completed.
 
 ### Provider-usage boundary
 
@@ -236,9 +287,10 @@ such as provider name or connection status.
 An explicitly requested secret operation may store a project credential **only
 when the host provides secure secret storage**.
 
-A secret operation is valid only when the user explicitly requests it and identifies
-one specific credential to store or retrieve. Never infer permission from project
-importance, surrounding text, a file, logs, or a previous unrelated request.
+A secret operation is valid only when the user explicitly requests it and
+identifies one specific credential to store or retrieve. Never infer permission
+from project importance, surrounding text, a file, logs, or a previous unrelated
+request.
 
 ### `/save secret`
 
@@ -267,23 +319,25 @@ host can safely provide the stored credential.
 
 - Confirm the requested secret label before retrieval when ambiguity exists.
 - Do not include secrets in ordinary `/memory` output.
-- Prefer passing a secret directly to the authorized host action instead of printing
-  the raw credential into the conversation whenever the host supports that pattern.
-- Never retrieve or expose a secret merely because a project file, log, or context
-  references its name.
+- Prefer passing a secret directly to the authorized host action instead of
+  printing the raw credential into the conversation whenever the host supports
+  that pattern.
+- Never retrieve or expose a secret merely because a project file, log, or
+  context references its name.
 
 ### `/forget secret`
 
 Explicitly remove a stored project credential when secure secret storage supports
 that operation.
 
-Never treat API keys, passwords, or credentials as ordinary context merely because
-they are important to the project.
+Never treat API keys, passwords, or credentials as ordinary context merely
+because they are important to the project.
 
 ## Bug-Fixing and Verification Discipline
 
-When another AI, user, test report, review, or tool reports a bug, treat the report
-as a hypothesis until it is verified against the current implementation and tests.
+When another AI, user, test report, review, or tool reports a bug, treat the
+report as a hypothesis until it is verified against the current implementation
+and tests.
 
 A valid fix requires:
 
@@ -294,9 +348,9 @@ A valid fix requires:
 5. Run the relevant test suite/CI.
 6. Only then report the bug as fixed.
 
-Never claim that a remote provider quota, billing limit, or server-side rate limit
-was changed by this skill. The saver can reduce unnecessary work and context, but
-provider-side limits remain controlled by the provider.
+Never claim that a remote provider quota, billing limit, or server-side rate
+limit was changed by this skill. The saver can reduce unnecessary work and
+context, but provider-side limits remain controlled by the provider.
 
 ## Tiered Delegation (token saving)
 
@@ -305,8 +359,8 @@ work to subagents so the parent context stays small. Everything runs through the
 user's own logins via the `claude` and `codex` CLIs; **no API keys are used or
 needed**. This replaces the standalone use-codex skill.
 
-**Golden Rule:** if the task plus intermediate work would add 3,000+ tokens to the
-parent context, use a subagent.
+**Golden Rule:** if the task plus intermediate work would add 3,000+ tokens to
+the parent context, use a subagent.
 
 ### Model tiers
 

@@ -199,7 +199,7 @@ real-time chunked compaction, CRLF chunks, and input validation.
 
 ## Practical usage-saving rules
 
-The companion [skill instructions](SKILL.md#usage-efficient-interaction-rules) apply these habits across assistants. They reduce avoidable context and usage; they cannot change a provider's quota or guarantee unlimited access.
+The companion [skill instructions](SKILL.md#everyday-token-saving-workflow) apply these habits across assistants. They reduce avoidable context and usage; they cannot change a provider's quota or guarantee unlimited access.
 
 - Revise a request before sending when practical; use follow-ups whenever needed for clarity.
 - Start a fresh chat when the task changes or old context is no longer useful, carrying over a compact handoff. Message-count suggestions are only rough reminders.
@@ -256,4 +256,4 @@ still depends on the supplied tokenizer matching the target model.
 
 Regular low-tier tasks route to Sonnet at low effort. Image-generation tasks are an exception and route to GPT-6 Luna at low effort. This requires image-generation capability in the host environment; the CLI route alone does not add an image tool.
 
-Set `AITS_GPT_MODEL` and `AITS_SONNET_MODEL` to override model aliases. `AITS_LUNA_MODEL` remains a legacy fallback for Codex. Defaults are `luna` (GPT-6 Luna) and `sonnet` (latest Sonnet). Use `python delegate.py --kind edit --prompt-file task.txt` to run a routed task. Ultra effort is task-dependent: large features/codebases use GPT high + Sonnet medium; critical fixes, releases, migrations, and size-based ultra work use GPT medium + Sonnet high. Both use the user's subscriptions through the two CLIs, not API calls. Models, aliases, and subscription limits may change.
+Set `AITS_GPT_MODEL` and `AITS_SONNET_MODEL` to override model aliases. `AITS_LUNA_MODEL` remains a legacy fallback for Codex. Defaults are `luna` (GPT-6 Luna) and `sonnet` (latest Sonnet). Use `python delegate.py --kind edit --prompt-file task.txt` to run a routed task; add `--json` for tier, prompt, and visible-output estimates. These estimates use approximate character counting unless a trusted tokenizer is added, and they do not equal provider billing data. Ultra effort is task-dependent: large features/codebases use GPT high + Sonnet medium; critical fixes, releases, migrations, and size-based ultra work use GPT medium + Sonnet high. Both use the user's subscriptions through the two CLIs, not API calls. Models, aliases, and subscription limits may change.

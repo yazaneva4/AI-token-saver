@@ -197,6 +197,19 @@ safety, newline preservation, exact/approximate token measurement, reduction bou
 memory merging, JSON round-tripping, malformed-memory handling, redaction modes,
 real-time chunked compaction, CRLF chunks, and input validation.
 
+## Practical usage-saving rules
+
+The companion [skill instructions](SKILL.md#usage-efficient-interaction-rules) apply these habits across assistants. They reduce avoidable context and usage; they cannot change a provider's quota or guarantee unlimited access.
+
+- Revise a request before sending when practical; use follow-ups whenever needed for clarity.
+- Start a fresh chat when the task changes or old context is no longer useful, carrying over a compact handoff. Message-count suggestions are only rough reminders.
+- Batch related questions, reuse recurring project files, and save stable preferences once in host settings.
+- Track usage with the provider's meter or a trusted tokenizer; mark estimates as approximate.
+- Use only the tools needed and choose a model suited to the task.
+- Follow the provider's documented usage windows. Off-peak timing and file caching benefits vary by provider.
+- Keep paid overage disabled unless the user chooses it, and use spending controls if enabled.
+- Do not schedule keep-alive prompts as a quota-saving trick; they can consume usage and do not reset limits.
+
 ## Token-saving philosophy
 
 AI Token Saver does **not** blindly delete context to hit a percentage. It prioritizes:

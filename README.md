@@ -210,6 +210,13 @@ The companion [skill instructions](SKILL.md#usage-efficient-interaction-rules) a
 - Keep paid overage disabled unless the user chooses it, and use spending controls if enabled.
 - Do not schedule keep-alive prompts as a quota-saving trick; they can consume usage and do not reset limits.
 
+
+## Concise output and safe tool-result reduction
+
+AI Token Saver now includes Caveman-inspired skill behavior: answer first, trim filler, use concise plain language, and keep every fact needed for correctness. Preserve code, commands, paths, identifiers, numbers, units, and decisive errors exactly. Security warnings, confirmation requests, and persisted content stay clear and complete.
+
+A host integration may shorten noisy logs, diffs, JSON, or search results only when it keeps the original available and retrievable. The existing Python text compactor does not itself provide a Caveman proxy or arbitrary tool-output compression. See the [Caveman skill](https://github.com/JuliusBrussee/caveman/tree/main/skills/caveman) for the inspiration.
+
 ## Token-saving philosophy
 
 AI Token Saver does **not** blindly delete context to hit a percentage. It prioritizes:
@@ -236,12 +243,17 @@ Early / experimental implementation. Token counting is approximate unless a trus
 model-specific tokenizer or token-counting function is supplied. Exact accounting
 still depends on the supplied tokenizer matching the target model.
 
-## Tiered model routing
+## Tiered subscription routing
 
-For desktop apps and CLIs (Claude Code, Codex). `model_router.py` and the
-*Tiered Delegation* section of `SKILL.md` route delegated work between GPT luna
-(Codex CLI) and Sonnet (Claude CLI) using your own subscriptions, with no API keys.
-low → luna(low); medium → luna(medium) + sonnet(medium); high → luna(medium) +
-sonnet(high); ultra → luna(high) + sonnet(high). luna drafts, Sonnet verifies.
-`python delegate.py --kind edit --prompt-file task.txt` runs it and returns the
-compacted answer. Override ids with `AITS_LUNA_MODEL`, `AITS_SONNET_MODEL`.
+`model_router.py` routes through the user's signed-in Codex and Claude CLI subscriptions. It does not require API keys.
+
+| Tier | Tasks | Route |
+|---|---|---|
+| Low | Search, lookup, formatting, simple summaries | Latest GPT Luna via Codex, low effort |
+| Medium | Normal edits, implementation, tests, docs, analysis | GPT via Codex, medium effort |
+| High | Architecture, hard debugging, security, research | Latest Sonnet via Claude CLI, high effort |
+| Ultra | Critical work, releases, migrations, large codebases | GPT via Codex drafts; latest Sonnet via Claude CLI verifies and corrects |
+
+Image-generation tasks route to GPT Luna at low effort. This requires image-generation capability in the host environment; the CLI route alone does not add an image tool.
+
+Set `AITS_GPT_MODEL` and `AITS_SONNET_MODEL` to override model aliases. `AITS_LUNA_MODEL` remains a legacy fallback for Codex. Defaults are `luna` and `sonnet`. Use `python delegate.py --kind edit --prompt-file task.txt` to run a routed task. Ultra paired work uses the user's subscriptions through the two CLIs, not API calls. Models, aliases, and subscription limits may change.

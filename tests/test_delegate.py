@@ -8,23 +8,35 @@ def fakes(log):
     return {"claude": run}
 
 
-def test_opus_main_runs_sonnet_executor_and_compacts():
+def test_auto_default_reports_detail_and_prefer():
+    log = []
+    res = delegate("summary", "x", main="opus", runners=fakes(log), env={})
+    assert log == [("haiku", "low")] and res["detail"]["chosen"] == "one:haiku"
+    log.clear()
+    res = delegate("plan", "x", main="sonnet", prefer="quality", runners=fakes(log), env={})
+    assert log == [("opus", "high")] and res["mode"] == "auto"
+
+
+def test_default_opus_runs_sonnet_and_compacts():
     log = []
     res = delegate("edit", "do it", main="opus", runners=fakes(log), env={})
-    assert log == [("sonnet", "medium")]
-    assert res["manager"] == "opus" and res["result"] == "answer"
+    assert log == [("sonnet", "medium")] and res["result"] == "answer"
 
 
-def test_sonnet_main_runs_haiku_executor():
+def test_solo_and_router_run_nothing():
+    for m, mode in (("opus", "solo"), ("sonnet", "solo"), ("haiku", "solo"), ("haiku", "router")):
+        log = []
+        res = delegate("architecture", "design", main=m, mode=mode, runners=fakes(log), env={})
+        assert log == [] and res["steps"] == []
+
+
+def test_one_model_and_mix_with_verifier():
     log = []
-    res = delegate("summary", "sum", main="sonnet", runners=fakes(log), env={})
-    assert log == [("haiku", "low")] and res["manager"] == "sonnet"
-
-
-def test_haiku_main_routes_without_running():
-    log = []
-    res = delegate("architecture", "design", main="haiku", runners=fakes(log), env={})
-    assert log == [] and res["mode"] == "router" and "opus" in res["result"]
+    delegate("edit", "x", main="sonnet", mode="one", model="opus", runners=fakes(log), env={})
+    assert log == [("opus", "medium")]
+    log.clear()
+    res = delegate("release", "x", main="opus", mode="mix", runners=fakes(log), env={})
+    assert log == [("sonnet", "high"), ("opus", "high")] and len(res["steps"]) == 2
 
 
 def test_missing_cli_is_clean_error(tmp_path, monkeypatch):

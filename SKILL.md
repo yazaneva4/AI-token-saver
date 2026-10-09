@@ -206,39 +206,72 @@ Use the user's authenticated Claude CLI subscription for delegated work. Do not
 require API keys or send tasks to paid API endpoints. If the CLI is unavailable
 or not signed in, report that clearly and continue directly where reasonable.
 
-The main model decides the team:
+The main model is always the manager: it plans, reviews, and owns the final
+answer. Pick one sub-agent mode per task:
 
-| Main model | Manager | Executor |
-|---|---|---|
-| Opus | Opus (plans, reviews, owns the final answer) | Sonnet |
-| Sonnet | Sonnet (plans, reviews, owns the final answer) | Haiku |
-| Haiku | none: router only | none; names the best model for the task and what the main model should do |
+| Mode | What happens |
+|---|---|
+| auto (default) | The optimizer scores every plan and picks the best (see below) |
+| solo | No sub-agents; the main model does the task itself |
+| one | One sub-agent model for the work (any model, set with `--model`) |
+| mix | Best model per tier: Haiku (low), Sonnet (medium), Opus (high); ultra adds a Sonnet draft then an Opus verifier |
+| router | No execution; names the best model and what the main model should do |
+
+`auto` is the default for every main model. Any main model may also force any
+mode and any sub-agent model: Opus may use Haiku, Sonnet may use Opus, Haiku may
+go solo, mix, or one-model. All models are the latest of their family (aliases
+`opus`, `sonnet`, `haiku` resolve to the newest through the Claude CLI).
+
+### Token-saving optimizer (auto)
+
+The manager picks the setup that best balances output quality, cost, speed, and
+main-model token use. Candidates: solo (main alone), one-model with Haiku,
+Sonnet, or Opus, and mix (Sonnet drafts, Opus verifies; for high/ultra work).
+
+1. Estimate each plan's quality for the task tier. Manager review lifts a weaker
+   single executor part-way toward the manager's quality.
+2. Drop any plan under the quality floor (0.85), so cheap never means weak.
+3. Score the rest on quality, cost, speed, and main-model tokens. Weights come from
+   `--prefer`: `balanced` (default: quality 0.5, cost 0.2, speed 0.2, tokens 0.1),
+   `quality`, `cheap`, `fast`, or `tokens`.
+4. Run the winner. The result reports the chosen plan, scores, and main-model
+   tokens saved versus working solo.
+
+Typical outcome: Haiku for lookups and summaries, Sonnet for edits, Sonnet+Opus mix
+for architecture and releases, solo when delegating would cost more than it saves.
+The cost, speed, and quality figures are relative estimates in `model_router.py`,
+not live prices; retune them there. Set the priority with `AITS_PREFER`.
 
 Executor effort follows the task tier: low (search, lookup, format, summaries),
 medium (edits, implementation, tests, docs, analysis, review), high
 (architecture, planning, debugging, security, refactors, research, critical
 work, releases, migrations, large features/codebases).
 
-Haiku as main never delegates. For a low-tier task it does the work itself; for
-medium it points to Sonnet and for high to Opus, telling the main model to hand
-the task over (or ask the user to switch models) and relay the result.
-
-Set the main model with `--main` or `AITS_MAIN_MODEL` (default `sonnet`). Override
-aliases with `AITS_OPUS_MODEL`, `AITS_SONNET_MODEL`, `AITS_HAIKU_MODEL`.
+Set the main model with `--main` or `AITS_MAIN_MODEL` (default `sonnet`), the
+mode with `--mode` or `AITS_SUBAGENT_MODE`. Override aliases with
+`AITS_OPUS_MODEL`, `AITS_SONNET_MODEL`, `AITS_HAIKU_MODEL`.
 
 Never add, request, or expose API keys for this workflow. Subscription availability,
 model aliases, and usage limits depend on the provider and may change.
 
 ### Automated runner
 
-`python delegate.py --kind <kind> --main <opus|sonnet|haiku> --prompt-file task.txt [--context-file ctx.txt] [--json]`
-compacts context, runs the executor (or, for Haiku, returns routing advice),
+`python delegate.py --kind <kind> --main <opus|sonnet|haiku> [--mode auto|solo|one|mix|router] [--prefer balanced|quality|cheap|fast|tokens] [--model <m>] --prompt-file task.txt [--context-file ctx.txt] [--json]`
+compacts context, runs the planned sub-agents (or returns advice for solo/router),
 compacts the answer, and prints it (`--json`: tier, main, manager, steps, tokens in/out). The `claude` CLI must be
 installed and authenticated with the user's subscription.
 
+### Choosing a mode
+
+- Default: `auto`. Override only with a reason:
+- Tiny or already-in-context work: `solo`.
+- Bulk, well-defined work under a stronger main model: `one` with a cheaper model.
+- Mixed workload or one that needs a stronger check: `mix`.
+- Main model too weak for the task (Haiku on high-tier work): `router`, then hand off.
+
 ### Instructions
 
-1. Clarify intent only when needed; select the team and tier with `route(...)`.
+1. Clarify intent only when needed; select the mode and tier with `route(...)`.
 2. Before delegation, compact and minimize the task context without dropping
    constraints, exact technical facts, or success criteria.
 3. The manager gives the executor the task and relevant context, then checks the
@@ -257,9 +290,14 @@ user specifically authorized a supported secure secret flow.
 ### Manual commands
 
 ```bash
-# Sonnet executor under an Opus manager
+# One-model sub-agent: Sonnet under an Opus main
 claude -p --model sonnet --effort medium < task.txt
 
-# Haiku executor under a Sonnet manager
+# One-model sub-agent: Haiku under a Sonnet main
 claude -p --model haiku --effort low < task.txt
+
+# Mix, ultra work: Sonnet drafts, Opus verifies
+claude -p --model sonnet --effort high < task.txt > draft.txt
+{ printf 'Verify and correct this draft. Return the final answer only.\n\nDRAFT:\n'; cat draft.txt; } |
+  claude -p --model opus --effort high
 ```

@@ -139,8 +139,6 @@ AI-token-saver/
 ├── model_router.py           # sub-agent routing and auto optimizer
 ├── delegate.py               # command-line runner for routed sub-agents
 ├── benchmarks/               # benchmark runner
-├── docs/                     # extra guides
-├── skill/                    # provider adapter contract
 ├── tests/                    # test suite
 └── .github/workflows/        # CI (tests.yml)
 ```

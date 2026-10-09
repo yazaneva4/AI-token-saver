@@ -129,14 +129,20 @@ installation method can vary. The core memory-saving rules remain provider-agnos
 
 ```text
 AI-token-saver/
-├── SKILL.md
-├── ai_token_saver.py
+├── SKILL.md                  # the skill
 ├── README.md
-├── .github/
-│   └── workflows/
-│       └── tests.yml
-└── tests/
-    └── test_ai_token_saver.py
+├── ai_token_saver.py         # core compaction engine (Python API)
+├── context_saver.py          # context snapshots
+├── usage_saver.py            # idempotent usage checkpoints
+├── realtime_usage_saver.py   # real-time incremental saver
+├── provider_adapter.py       # provider-neutral integration and output levels
+├── model_router.py           # sub-agent routing and auto optimizer
+├── delegate.py               # command-line runner for routed sub-agents
+├── benchmarks/               # benchmark runner
+├── docs/                     # extra guides
+├── skill/                    # provider adapter contract
+├── tests/                    # test suite
+└── .github/workflows/        # CI (tests.yml)
 ```
 
 ## Quick start
@@ -144,13 +150,14 @@ AI-token-saver/
 ```bash
 git clone https://github.com/yazaneva4/AI-token-saver.git
 cd AI-token-saver
-python ai_token_saver.py "We need to save the project state.\nThe project state is important.\nThe project state is important."
 ```
 
-Without a supplied model tokenizer, the CLI labels its token measurement as approximate.
+`ai_token_saver.py` is a Python library with no command-line interface. See
+[Python usage](#python-usage) below. Without a supplied model tokenizer, token
+measurements are labeled approximate.
 
-Use `--aggressive` only when stronger prose deduplication is wanted. Technical-looking
-content remains protected.
+For stronger prose deduplication, call `compact_text(text, aggressive=True)`.
+Technical-looking content remains protected.
 
 ## Python usage
 

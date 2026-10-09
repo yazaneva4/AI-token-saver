@@ -240,9 +240,16 @@ compacts context, runs the planned sub-agents (or returns advice for solo/router
 compacts the answer, and prints it (`--json`: tier, main, manager, steps, tokens in/out). The `claude` CLI must be
 installed and authenticated with the user's subscription.
 
+### Choosing a mode
+
+- Tiny or already-in-context work: `solo`.
+- Bulk, well-defined work under a stronger main model: `one` with a cheaper model.
+- Mixed workload or one that needs a stronger check: `mix`.
+- Main model too weak for the task (Haiku on high-tier work): `router`, then hand off.
+
 ### Instructions
 
-1. Clarify intent only when needed; select the team and tier with `route(...)`.
+1. Clarify intent only when needed; select the mode and tier with `route(...)`.
 2. Before delegation, compact and minimize the task context without dropping
    constraints, exact technical facts, or success criteria.
 3. The manager gives the executor the task and relevant context, then checks the
@@ -261,9 +268,14 @@ user specifically authorized a supported secure secret flow.
 ### Manual commands
 
 ```bash
-# Sonnet executor under an Opus manager
+# One-model sub-agent: Sonnet under an Opus main
 claude -p --model sonnet --effort medium < task.txt
 
-# Haiku executor under a Sonnet manager
+# One-model sub-agent: Haiku under a Sonnet main
 claude -p --model haiku --effort low < task.txt
+
+# Mix, ultra work: Sonnet drafts, Opus verifies
+claude -p --model sonnet --effort high < task.txt > draft.txt
+{ printf 'Verify and correct this draft. Return the final answer only.\n\nDRAFT:\n'; cat draft.txt; } |
+  claude -p --model opus --effort high
 ```

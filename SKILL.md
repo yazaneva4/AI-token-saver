@@ -243,15 +243,21 @@ reasonable.
 
 ### Any agent, any provider
 
+Tiers are labels matched by model name, not a power comparison between vendors:
+this skill never judges whether a GPT model is stronger or weaker than a Claude
+model, it only places each model in the tier its own name says.
+
 The tiers are provider-neutral. **Haiku = light, Sonnet = standard, Opus = deep.**
 A GPT, Gemini or local main model is placed in a tier by its name (`mini`, `nano`,
 `flash`, `lite` = light; `pro`, `ultra`, `max`, `o3` = deep; otherwise standard) and
 gets sub-agents from the models actually available, in the same tier as the Claude
 model it replaces. Rules:
 
-1. Ask for a tier, not a vendor model. Use the first available provider that has it,
-   starting with the main model's own provider.
-2. If a tier is missing, use the nearest tier that exists (ties go to the stronger
+1. Ask for a tier, not a vendor model. Use the main model's own provider and its own
+   tier models, even when other providers' CLIs are installed: a GPT main keeps to
+   GPT tiers, a Claude main to Claude tiers. Use another provider only when the main
+   model's provider has no model available, matching the tier exactly.
+2. If the own provider lacks a tier, use its nearest tier (ties go to the stronger
    one) and say so. If no provider is available, the main model works alone.
 3. Never name a Claude model when Claude is not available.
 4. Hosts with their own sub-agent tool can skip the CLIs: call `route(..., providers={...})`

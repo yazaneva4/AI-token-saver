@@ -200,51 +200,49 @@ Never claim that a remote provider quota, billing limit, or server-side rate
 limit was changed by this skill. The saver can reduce unnecessary work and
 context, but provider-side limits remain controlled by the provider.
 
-## Tiered Delegation (subscription-backed, no API)
+## Sub-agent Plan (main-model-aware, subscription-backed, no API)
 
-Use the user's authenticated Codex and Claude CLI subscriptions for delegated
-work. Do not require API keys or send tasks to paid API endpoints. If either CLI
-is unavailable or not signed in, report that clearly and continue with the
-available model where reasonable.
+Use the user's authenticated Claude CLI subscription for delegated work. Do not
+require API keys or send tasks to paid API endpoints. If the CLI is unavailable
+or not signed in, report that clearly and continue directly where reasonable.
 
-Delegate context-heavy work when doing so keeps the parent context smaller.
-Choose one route for each task:
+The main model decides the team:
 
-| Tier | Work | Subscription-backed worker |
+| Main model | Manager | Executor |
 |---|---|---|
-| low | Search, lookup, fetch, rename, formatting, summaries | Latest Sonnet through Claude CLI, low effort |
-| medium | Normal edits, implementation, tests, docs, analysis, review | GPT-6 Luna through Codex, medium effort |
-| high | Architecture, planning, hard debugging, security, multi-file refactors, research | Latest Sonnet through Claude CLI, high effort |
-| ultra | Critical changes, releases, migrations, large features/codebases | GPT-6 Luna and latest Sonnet work together; one uses medium effort and the other high, based on task type |
+| Opus | Opus (plans, reviews, owns the final answer) | Sonnet |
+| Sonnet | Sonnet (plans, reviews, owns the final answer) | Haiku |
+| Haiku | none: router only | none; names the best model for the task and what the main model should do |
 
-Image-generation tasks are a low-effort exception: use GPT-6 Luna via the user's
-Codex subscription. Other low-tier tasks use latest Sonnet at low effort. If an image tool is not available through that subscription, report the
-limitation; do not silently switch to an API.
+Executor effort follows the task tier: low (search, lookup, format, summaries),
+medium (edits, implementation, tests, docs, analysis, review), high
+(architecture, planning, debugging, security, refactors, research, critical
+work, releases, migrations, large features/codebases).
 
-Use `AITS_GPT_MODEL` to override GPT-6 Luna in Codex (default alias `luna`); the legacy
-`AITS_LUNA_MODEL` remains a fallback. Use `AITS_SONNET_MODEL` to override the
-Claude model (default `sonnet`, resolved by Claude CLI as its current Sonnet).
+Haiku as main never delegates. For a low-tier task it does the work itself; for
+medium it points to Sonnet and for high to Opus, telling the main model to hand
+the task over (or ask the user to switch models) and relay the result.
 
-The Codex CLI and Claude CLI must use the user's own signed-in subscriptions.
+Set the main model with `--main` or `AITS_MAIN_MODEL` (default `sonnet`). Override
+aliases with `AITS_OPUS_MODEL`, `AITS_SONNET_MODEL`, `AITS_HAIKU_MODEL`.
+
 Never add, request, or expose API keys for this workflow. Subscription availability,
 model aliases, and usage limits depend on the provider and may change.
 
 ### Automated runner
 
-`python delegate.py --kind <kind> --prompt-file task.txt [--context-file ctx.txt] [--json]`
-compacts context, runs the selected subscription-backed step or GPT draft + Sonnet verification for ultra work, compacts the answer, and prints it (`--json`: tier, steps, tokens in/out). The `codex` and `claude` CLIs must be
-installed and authenticated with the user's subscriptions.
+`python delegate.py --kind <kind> --main <opus|sonnet|haiku> --prompt-file task.txt [--context-file ctx.txt] [--json]`
+compacts context, runs the executor (or, for Haiku, returns routing advice),
+compacts the answer, and prints it (`--json`: tier, main, manager, steps, tokens in/out). The `claude` CLI must be
+installed and authenticated with the user's subscription.
 
 ### Instructions
 
-1. Clarify intent only when needed; select the tier with `route(...)`.
+1. Clarify intent only when needed; select the team and tier with `route(...)`.
 2. Before delegation, compact and minimize the task context without dropping
    constraints, exact technical facts, or success criteria.
-3. For ultra work, give both agents the same task and relevant context. Route
-   large features/codebases to GPT high + Sonnet medium; route critical fixes,
-   releases, migrations, and size-based ultra work to GPT medium + Sonnet high.
-   GPT drafts; Sonnet checks independently and corrects. The parent checks the
-   final output against the user's request.
+3. The manager gives the executor the task and relevant context, then checks the
+   executor's output independently against the user's request before reporting.
 4. Do not run multiple agents for work that is simpler or cheaper to complete
    directly.
 5. Report the result concisely, with verification status and material limits.
@@ -259,21 +257,9 @@ user specifically authorized a supported secure secret flow.
 ### Manual commands
 
 ```bash
-# GPT-6 Luna image-generation task via the user's Codex subscription
-cat <<'EOF' | codex exec --yolo --skip-git-repo-check -m luna \
-  -c 'model_reasoning_effort="low"' -o /tmp/draft.txt -
-[TASK CONTEXT] ... [OBJECTIVES] ... [OUTPUT FORMAT] ...
-EOF
+# Sonnet executor under an Opus manager
+claude -p --model sonnet --effort medium < task.txt
 
-## Latest Sonnet via the user's Claude subscription (low-tier regular task)
-
-`claude -p --model sonnet --effort low`
-
-## Latest Sonnet verifies ultra work via the user's Claude subscription
-{ printf 'Verify and correct this draft. Return the final answer only.\n\nDRAFT:\n'; cat /tmp/draft.txt; } |
-  claude -p --model sonnet --effort high
+# Haiku executor under a Sonnet manager
+claude -p --model haiku --effort low < task.txt
 ```
-
-Always use quoted heredocs (`<<'EOF'`) and pass prior output on stdin. Never
-interpolate model output into an unquoted heredoc because it may contain shell
-syntax. The automated runner applies the routed effort for each task.

@@ -3,9 +3,10 @@
     python delegate.py --kind edit --prompt-file task.txt [--context-file ctx.txt]
 
 Runs the `claude` CLI with your own login; no API keys needed. The main model
-(--main opus|sonnet|haiku, or AITS_MAIN_MODEL) sets the team: opus manages and
-sonnet executes; sonnet manages and haiku executes; haiku only routes (returns
-the best model and what to do, runs nothing). The manager reviews the result.
+(--main opus|sonnet|haiku, or AITS_MAIN_MODEL) is the manager and reviews the result.
+--mode: solo (main does it, no sub-agents), one (one sub-agent model; defaults
+opus->sonnet, sonnet->haiku, or --model), mix (best model per tier), router
+(advice only; the default for haiku).
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ import sys
 from typing import Callable
 
 from ai_token_saver import compact_text, estimate_tokens
-from model_router import ROUTER, Step, command, route
+from model_router import Step, command, route
 
 Runner = Callable[[Step, str], str]
 
@@ -39,18 +40,23 @@ RUNNERS: dict[str, Runner] = {"claude": run_claude}
 
 
 def delegate(kind: str, prompt: str, context: str = "", *, main: str | None = None,
+             mode: str | None = None, model: str | None = None,
              runners: dict[str, Runner] | None = None, env: dict[str, str] | None = None) -> dict:
-    """Compact context, run the executor (manager reviews), compact the answer."""
+    """Compact context, run the planned sub-agents (verifier reviews draft), compact the answer."""
     runners = runners or RUNNERS
-    r = route(kind, main=main, tokens=estimate_tokens(prompt + context), env=env)
+    r = route(kind, main=main, mode=mode, model=model, tokens=estimate_tokens(prompt + context), env=env)
     full = compact_text(f"{context}\n\n{prompt}" if context else prompt)
-    base = {"tier": r.tier, "main": r.main, "mode": r.mode, "manager": r.manager,
+    base = {"tier": r.tier, "main": r.main, "mode": r.mode,
             "steps": [f"{s.cli}:{s.model}:{s.effort}:{s.role}" for s in r.steps],
             "tokens_in": estimate_tokens(full)}
-    if r.mode == ROUTER:
+    if not r.steps:  # solo or router: nothing to run, the main model acts on the advice
         return {**base, "tokens_out": estimate_tokens(r.advice), "result": r.advice}
-    step = r.steps[0]
-    out = compact_text(runners[step.cli](step, full))
+    out = ""
+    for i, step in enumerate(r.steps):
+        p = full if i == 0 else (
+            f"Verify and correct this draft. Return the final answer only.\n\nTASK:\n{full}\n\nDRAFT:\n{out}")
+        out = runners[step.cli](step, p)
+    out = compact_text(out)
     return {**base, "tokens_out": estimate_tokens(out), "result": out}
 
 
@@ -60,12 +66,15 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--prompt-file", required=True)
     a.add_argument("--context-file")
     a.add_argument("--main", help="main model: opus, sonnet, or haiku")
+    a.add_argument("--mode", choices=["solo", "one", "mix", "router"],
+                   help="solo: main does it; one: one sub-agent model; mix: best model per tier; router: advice only")
+    a.add_argument("--model", help="sub-agent model for --mode one: opus, sonnet, or haiku")
     a.add_argument("--json", action="store_true")
     n = a.parse_args(argv)
     prompt = open(n.prompt_file, encoding="utf-8").read()
     ctx = open(n.context_file, encoding="utf-8").read() if n.context_file else ""
     try:
-        res = delegate(n.kind, prompt, ctx, main=n.main)
+        res = delegate(n.kind, prompt, ctx, main=n.main, mode=n.mode, model=n.model)
     except (RuntimeError, ValueError, OSError) as e:
         print(f"delegate: {e}", file=sys.stderr)
         return 1

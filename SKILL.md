@@ -206,33 +206,37 @@ Use the user's authenticated Claude CLI subscription for delegated work. Do not
 require API keys or send tasks to paid API endpoints. If the CLI is unavailable
 or not signed in, report that clearly and continue directly where reasonable.
 
-The main model decides the team:
+The main model is always the manager: it plans, reviews, and owns the final
+answer. Pick one sub-agent mode per task:
 
-| Main model | Manager | Executor |
-|---|---|---|
-| Opus | Opus (plans, reviews, owns the final answer) | Sonnet |
-| Sonnet | Sonnet (plans, reviews, owns the final answer) | Haiku |
-| Haiku | none: router only | none; names the best model for the task and what the main model should do |
+| Mode | What happens |
+|---|---|
+| solo | No sub-agents; the main model does the task itself |
+| one | One sub-agent model for the work (any model, set with `--model`) |
+| mix | Best model per tier: Haiku (low), Sonnet (medium), Opus (high); ultra adds a Sonnet draft then an Opus verifier |
+| router | No execution; names the best model and what the main model should do |
+
+Defaults when no mode is given: Opus main -> `one` with Sonnet; Sonnet main ->
+`one` with Haiku; Haiku main -> `router`. Any main model may choose any mode and
+any sub-agent model: Opus may use Haiku, Sonnet may use Opus, Haiku may go
+solo, mix, or one-model. Use solo when delegating costs more than doing the work.
 
 Executor effort follows the task tier: low (search, lookup, format, summaries),
 medium (edits, implementation, tests, docs, analysis, review), high
 (architecture, planning, debugging, security, refactors, research, critical
 work, releases, migrations, large features/codebases).
 
-Haiku as main never delegates. For a low-tier task it does the work itself; for
-medium it points to Sonnet and for high to Opus, telling the main model to hand
-the task over (or ask the user to switch models) and relay the result.
-
-Set the main model with `--main` or `AITS_MAIN_MODEL` (default `sonnet`). Override
-aliases with `AITS_OPUS_MODEL`, `AITS_SONNET_MODEL`, `AITS_HAIKU_MODEL`.
+Set the main model with `--main` or `AITS_MAIN_MODEL` (default `sonnet`), the
+mode with `--mode` or `AITS_SUBAGENT_MODE`. Override aliases with
+`AITS_OPUS_MODEL`, `AITS_SONNET_MODEL`, `AITS_HAIKU_MODEL`.
 
 Never add, request, or expose API keys for this workflow. Subscription availability,
 model aliases, and usage limits depend on the provider and may change.
 
 ### Automated runner
 
-`python delegate.py --kind <kind> --main <opus|sonnet|haiku> --prompt-file task.txt [--context-file ctx.txt] [--json]`
-compacts context, runs the executor (or, for Haiku, returns routing advice),
+`python delegate.py --kind <kind> --main <opus|sonnet|haiku> [--mode solo|one|mix|router] [--model <m>] --prompt-file task.txt [--context-file ctx.txt] [--json]`
+compacts context, runs the planned sub-agents (or returns advice for solo/router),
 compacts the answer, and prints it (`--json`: tier, main, manager, steps, tokens in/out). The `claude` CLI must be
 installed and authenticated with the user's subscription.
 

@@ -18,11 +18,13 @@ MEDIUM_KINDS = {"edit", "implement", "tests", "docs", "analysis", "review"}
 HIGH_KINDS = {"architecture", "plan", "debug", "security", "multi_file_refactor", "refactor", "research"}
 ULTRA_KINDS = {"critical", "release", "migration", "large_feature", "large_codebase"}
 
-MANAGER_EXECUTOR = "manager_executor"
-ROUTER = "router"
-# main model -> (manager, executor); haiku has no executor, it only routes.
-TEAMS = {"opus": ("opus", "sonnet"), "sonnet": ("sonnet", "haiku"), "haiku": ("haiku", None)}
-# Best model per tier, used when the main model is only a router.
+SOLO, ONE, MIX, ROUTER = "solo", "one", "mix", "router"
+MODES = (SOLO, ONE, MIX, ROUTER)
+MODELS = ("opus", "sonnet", "haiku")
+# Default sub-agent model per main model for "one" mode (haiku defaults to router).
+DEFAULT_ONE = {"opus": "sonnet", "sonnet": "haiku", "haiku": "haiku"}
+DEFAULT_MODE = {"opus": ONE, "sonnet": ONE, "haiku": ROUTER}
+# Best model per tier: advice for routers and the per-tier pick in "mix" mode.
 BEST_MODEL = {LOW: "haiku", MEDIUM: "sonnet", HIGH: "opus", ULTRA: "opus"}
 _EFFORT = {LOW: "low", MEDIUM: "medium", HIGH: "high", ULTRA: "high"}
 
@@ -40,7 +42,6 @@ class Route:
     tier: str
     main: str
     mode: str
-    manager: str
     steps: tuple[Step, ...]
     advice: str = ""
 
@@ -80,20 +81,39 @@ def classify(kind: str, *, tokens: int = 0) -> str:
     return LOW if tokens and tokens < 1500 else HIGH if tokens > 20000 else MEDIUM
 
 
-def route(kind: str, *, main: str | None = None, tokens: int = 0,
-          env: dict[str, str] | None = None) -> Route:
+def route(kind: str, *, main: str | None = None, mode: str | None = None, model: str | None = None,
+          tokens: int = 0, env: dict[str, str] | None = None) -> Route:
+    """Plan sub-agents for a task. The main model is always the manager.
+
+    mode: solo (main does it, no sub-agents), one (all sub-agents use one model,
+    `model` or the main's default), mix (best model per tier; ultra adds a
+    stronger verifier), router (advice only). Any main model may use any model.
+    """
     env = os.environ if env is None else env
     main = normalize_main(main or env.get("AITS_MAIN_MODEL"))
+    mode = (mode or env.get("AITS_SUBAGENT_MODE") or DEFAULT_MODE[main]).lower()
+    if mode not in MODES:
+        raise ValueError(f"unknown mode {mode!r}; use one of {MODES}")
     tier = classify(kind, tokens=tokens)
-    manager, executor = TEAMS[main]
-    if executor is None:
+    effort = _EFFORT[tier]
+    if mode == SOLO:
+        return Route(tier, main, SOLO, (), f"{main} (main) does this task itself; no sub-agents.")
+    if mode == ROUTER:
         best = BEST_MODEL[tier]
-        if best == "haiku":
-            advice = f"Best model for this {tier}-tier task: haiku. Main model (haiku) should do it directly."
+        if best == main:
+            advice = f"Best model for this {tier}-tier task: {best}. Main model ({main}) should do it directly."
         else:
-            advice = (f"Best model for this {tier}-tier task: {best}. Main model (haiku) should not attempt it; "
-                      f"hand it to {best} (or ask the user to switch) and relay the result.")
-        return Route(tier, main, ROUTER, manager, (), advice)
-    step = Step("claude", _model(executor, env), _EFFORT[tier], "executor")
-    advice = f"{manager} manages (plans, reviews, owns the final answer); {executor} executes."
-    return Route(tier, main, MANAGER_EXECUTOR, manager, (step,), advice)
+            advice = (f"Best model for this {tier}-tier task: {best}. Main model ({main}) should hand it to "
+                      f"{best} (or ask the user to switch) and relay the result.")
+        return Route(tier, main, ROUTER, (), advice)
+    if mode == ONE:
+        m = normalize_main(model) if model else DEFAULT_ONE[main]
+        names = [m]
+    else:  # MIX
+        names = [BEST_MODEL[tier]]
+        if tier == ULTRA:
+            names = ["sonnet", "opus"]  # draft, then stronger verification
+    steps = tuple(Step("claude", _model(n, env), effort, "executor" if i == 0 else "verifier")
+                  for i, n in enumerate(names))
+    advice = f"{main} manages (plans, reviews, owns the final answer); {mode} sub-agents: {', '.join(names)}."
+    return Route(tier, main, mode, steps, advice)

@@ -36,8 +36,14 @@ def test_non_adjacent_duplicate_code_lines_are_preserved():
 
 
 def test_compaction_preserves_no_final_newline():
-    source = "same\nsame"
-    assert compact_text(source, redact_secrets=False) == "same"
+    assert compact_text("same", redact_secrets=False) == "same"
+    assert compact_text("one\ntwo", redact_secrets=False) == "one\ntwo"
+
+
+def test_removed_duplicate_final_line_keeps_previous_newline():
+    # A stream has already emitted "same\n" before it can know the last line is a
+    # removed duplicate, so batch output matches the stream byte for byte.
+    assert compact_text("same\nsame", redact_secrets=False) == "same\n"
 
 
 def test_aggressive_mode_does_not_globally_deduplicate_technical_content():

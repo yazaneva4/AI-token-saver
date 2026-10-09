@@ -33,16 +33,20 @@ class RealtimeUsageSaver:
 
     def __init__(self, *, redact_secrets: bool = True, redaction_mode: RedactionMode | None = None,
                  aggressive: bool = False, last_fingerprint: str | None = None,
-                 state_path: str | os.PathLike[str] | None = None, lock_timeout: float = 5.0) -> None:
+                 state_path: str | os.PathLike[str] | None = None, lock_timeout: float = 5.0,
+                 suppress_unchanged: bool = False) -> None:
         if lock_timeout <= 0:
             raise ValueError("lock_timeout must be positive")
         self.redact_secrets = redact_secrets
         self.redaction_mode = redaction_mode
         self.aggressive = aggressive
+        self.suppress_unchanged = suppress_unchanged
         self.state_path = Path(state_path).expanduser() if state_path else None
         self.lock_timeout = float(lock_timeout)
         self.last_fingerprint = last_fingerprint if last_fingerprint is not None else self._load_fingerprint()
         self._compactor: RealtimeCompactor | None = None
+        self._held: list[str] = []
+        self._hold_output = False
         self._finished = False
         self.last_result: RealtimeUsageResult | None = None
 
@@ -150,6 +154,13 @@ class RealtimeUsageSaver:
                                             aggressive=self.aggressive)
         self._finished = False
         self.last_result = None
+        # Whether the input repeats the saved state is only known once all of it has
+        # been seen. By default output streams immediately and ``result.changed``
+        # reports repetition (existing behaviour). With ``suppress_unchanged=True``
+        # and a saved fingerprint, output is held until finish() and dropped when the
+        # input is identical, so repeated input never emits duplicate content.
+        self._hold_output = self.suppress_unchanged and self.last_fingerprint is not None
+        self._held = []
 
     def feed(self, chunk: str) -> str:
         if self._compactor is None:
@@ -159,7 +170,12 @@ class RealtimeUsageSaver:
         if not isinstance(chunk, str):
             raise TypeError("chunk must be a string")
         assert self._compactor is not None
-        return self._compactor.feed(chunk)
+        emitted = self._compactor.feed(chunk)
+        if self._hold_output:
+            if emitted:
+                self._held.append(emitted)
+            return ""
+        return emitted
 
     def finish(self) -> tuple[str, RealtimeUsageResult]:
         if self._compactor is None:
@@ -177,6 +193,9 @@ class RealtimeUsageSaver:
             previous = self._load_fingerprint() if self.state_path else self.last_fingerprint
             changed = fingerprint != previous
             final_output = self._compactor.finish()
+            held, self._held = "".join(self._held), []
+            # Unchanged input: suppress everything that was held back.
+            final_output = held + final_output if changed or not self._hold_output else ""
             result = RealtimeUsageResult(fingerprint, self._compactor.result(), changed)
             if changed:
                 self._persist_fingerprint(fingerprint)

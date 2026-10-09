@@ -11,21 +11,16 @@ import secrets
 import time
 from typing import Callable, Iterable, Mapping
 
+from ai_token_saver import _redact_secrets
+
 PRESERVED_FIELDS = ("project", "current_task", "decisions", "bugs", "fixes", "files", "commands", "tests", "services", "next_steps")
-_SECRET_PATTERNS = (
-    re.compile(r"(?i)(\bapi[-_]key\b\s*[:=]\s*)([^\s,;]+)"),
-    re.compile(r"(?i)(\b(?:access[-_]?token|auth[-_]?token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"),
-    re.compile(r"(?i)(\bbearer\s+)([A-Za-z0-9._~+/=-]{16,})"),
-)
 
 
 def _redact(value: object) -> str:
+    """Redact credentials with the shared redactor (JSON/YAML/annotated and quoted values included)."""
     if value is None:
         return ""
-    text = str(value).strip()
-    for pattern in _SECRET_PATTERNS:
-        text = pattern.sub(r"\1[REDACTED]", text)
-    return text
+    return _redact_secrets(str(value).strip(), "common")
 
 
 def _clean(value: object) -> str:

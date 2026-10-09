@@ -13,30 +13,20 @@ import json
 import re
 from typing import Any, Iterable, Mapping
 
+from ai_token_saver import _redact_secrets
+
 SAVER_ALIASES = frozenset({"/ai-token-saver", "/ai-usage-saver"})
 _SAVER_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9_-])/(?:ai-token-saver|ai-usage-saver)(?![A-Za-z0-9_-])")
-_SECRET_PATTERNS = (
-    re.compile(r"(?i)(\bapi[-_]key\b\s*[:=]\s*)([^\s,;]+)"),
-    re.compile(r"(?i)(\b(?:access[-_]?token|auth[-_]?token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"),
-    re.compile(r"(?i)(\bbearer\s+)([A-Za-z0-9._~+/=-]{16,})"),
-    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
-    re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"),
-)
-
 _SECRET_FIELD_RE = re.compile(
     r"(?i)^(?:api[-_]?key|access[-_]?token|auth[-_]?token|token|password|secret)$"
 )
 
 
 def _redact(value: object) -> str:
+    """Redact credentials with the shared redactor in strict mode (also Google API keys)."""
     if value is None:
         return ""
-    text = str(value).strip()
-    for pattern in _SECRET_PATTERNS[:3]:
-        text = pattern.sub(r"\1[REDACTED]", text)
-    text = _SECRET_PATTERNS[3].sub("[REDACTED]", text)
-    text = _SECRET_PATTERNS[4].sub("[REDACTED]", text)
-    return text
+    return _redact_secrets(str(value).strip(), "strict")
 
 
 def _is_secret_field(name: object) -> bool:

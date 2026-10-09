@@ -273,3 +273,20 @@ Executor effort follows the task tier (low / medium / high; ultra work runs at h
 ## Measuring savings
 
 `python benchmarks/e2e_savings.py [--json]` reports, per workload, context tokens (raw vs compacted), input tokens (raw vs the prepared request, including the output-style line), the sub-agent plan the `auto` optimizer picks, and the modeled main-model token saving. It runs offline. Reply (output) tokens depend on a live model and are not measured; the report shows only how many tokens each output level adds to the prompt. Savings vary by workload, from about 99% on heavily repeated history to roughly 0% on distinct text, and are never guaranteed.
+
+## Processing levels and limits
+
+Compaction is split into levels, and redaction is kept apart from all of them:
+
+| Level | What it does | Lossless? |
+|---|---|---|
+| Normalisation | Line endings (`\r\n`, `\r`) become `\n`; only these three are line breaks, so U+2028, form feeds and similar stay in the text | Yes, apart from line endings |
+| Conservative (default) | Drops runs of blank lines beyond one paragraph break and consecutive duplicate prose lines. Code, JSON, log/event records, list items and `key: value` lines are never deduplicated; code keeps its blank lines exactly | No |
+| Intentionally lossy | `aggressive=True` removes any repeated prose line (same protections as above) | No |
+| Redaction | Replaces credentials with `[REDACTED]`. Quoted values keep their quotes so JSON and Python stay parseable; calls, attribute access, subscripts and `$VAR` references (`password = get_pw()`) are left alone | No, never counted as lossless |
+
+`compact_text` and `compact_stream` use one engine, so for any chunking, including one character at a time and splits inside `\r\n`, streaming output equals batch output. When the final input line is a removed duplicate and the input has no final newline, the output ends with one newline because a stream cannot take back a newline it already sent.
+
+`RealtimeUsageSaver(..., suppress_unchanged=True)` holds output until `finish()` and emits nothing when the input matches the saved fingerprint. The default still streams immediately and reports repetition through `result.changed`.
+
+Known limits: a bare unquoted identifier assigned to a secret key outside a call (`password = hunter2`) is redacted, because it cannot be told apart from a `.env` secret. Redaction matches key names, not values, so a secret under another name is not found. Detection of code and log lines is heuristic. `python benchmarks/audit_compare.py` compares token counts, time and peak memory against a baseline git ref.

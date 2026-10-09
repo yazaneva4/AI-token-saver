@@ -269,3 +269,7 @@ Executor effort follows the task tier (low / medium / high; ultra work runs at h
 ## Output levels
 
 `provider_adapter.prepare_request(state, request, output_level=...)` selects how terse the reply instruction is: `standard` (default), `tight` (short plain sentences, no recap), or `max` (result only: the code, command, value, or diff, plus one full-sentence line for any blocker or warning). Every level keeps grammar, exact technical payloads, and full-sentence warnings, so it never degrades into telegraphic "caveman" speech, and this skill takes precedence if such a skill is also active. Savings depend on the task: large when the answer is a command or patch, small when it needs explanation. They are never guaranteed.
+
+## Measuring savings
+
+`python benchmarks/e2e_savings.py [--json]` reports, per workload, context tokens (raw vs compacted), input tokens (raw vs the prepared request, including the output-style line), the sub-agent plan the `auto` optimizer picks, and the modeled main-model token saving. It runs offline. Reply (output) tokens depend on a live model and are not measured; the report shows only how many tokens each output level adds to the prompt. Savings vary by workload, from about 99% on heavily repeated history to roughly 0% on distinct text, and are never guaranteed.

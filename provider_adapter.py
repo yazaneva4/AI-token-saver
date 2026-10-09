@@ -11,10 +11,31 @@ from typing import Any, Mapping, Protocol
 from context_saver import ContextSaveResult, ContextSaver
 
 
-OUTPUT_SAVING_INSTRUCTION = (
-    "Answer directly. Be concise by default; follow the requested detail and format, "
-    "preserving all necessary facts."
-)
+# Output levels trade words for tokens, never meaning. Unlike telegraphic
+# "caveman" speech, every level keeps grammar, exact payloads, and full warnings.
+OUTPUT_LEVELS = {
+    "standard": (
+        "Answer directly. Be concise by default; follow the requested detail and format, "
+        "preserving all necessary facts."
+    ),
+    "tight": (
+        "Answer first in short plain sentences. No preamble, recap, or offers of more help. "
+        "Keep exact code, paths, numbers, warnings, and conditions in full."
+    ),
+    "max": (
+        "Return only the result: the code, command, value, or diff. Add one line only for a "
+        "blocker, risk, or warning, written in full. No explanation unless asked. Never drop "
+        "error text, security warnings, or confirmation requests."
+    ),
+}
+OUTPUT_SAVING_INSTRUCTION = OUTPUT_LEVELS["standard"]
+
+
+def output_instruction(level: str = "standard") -> str:
+    try:
+        return OUTPUT_LEVELS[level]
+    except KeyError:
+        raise ValueError(f"unknown output level {level!r}; use one of {tuple(OUTPUT_LEVELS)}") from None
 
 
 class ContextProvider(Protocol):
@@ -42,9 +63,10 @@ class PreparedProviderRequest:
     request: str
     context: str
     fingerprint: str
+    output_level: str = "standard"
 
     def render(self) -> str:
-        parts = [f"OUTPUT STYLE: {OUTPUT_SAVING_INSTRUCTION}"]
+        parts = [f"OUTPUT STYLE: {output_instruction(self.output_level)}"]
         if self.context:
             parts.append(self.context)
         if self.request:
@@ -89,7 +111,8 @@ class ProviderAdapter:
         result = self.saver.save_if_changed(state)
         return None if result is None else self._result(result)
 
-    def prepare_request(self, state: Mapping[str, Any], request: str) -> PreparedProviderRequest:
+    def prepare_request(self, state: Mapping[str, Any], request: str,
+                        output_level: str = "standard") -> PreparedProviderRequest:
         """Compact context for the next provider request without persisting it.
 
         This is intentionally a pre-request operation: it does not call a
@@ -99,12 +122,14 @@ class ProviderAdapter:
         """
         if not isinstance(request, str):
             raise TypeError("request must be a string")
+        output_instruction(output_level)  # validate before doing any work
         snapshot = self.saver.build(state)
         return PreparedProviderRequest(
             provider=self.provider,
             request=request,
             context=snapshot.to_text(),
             fingerprint=snapshot.fingerprint(),
+            output_level=output_level,
         )
 
     def save_after_response(self, state: Mapping[str, Any]) -> ProviderSaveResult | None:

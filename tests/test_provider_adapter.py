@@ -161,3 +161,16 @@ def test_adapter_persistent_state_is_provider_specific(tmp_path):
     assert openspark is not None
     assert cursor.fingerprint == openspark.fingerprint
     assert cursor_path != openspark_path
+
+
+def test_output_levels_keep_warnings_and_validate():
+    import pytest
+    from provider_adapter import OUTPUT_LEVELS
+    adapter = ProviderAdapter("Claude", saver=ContextSaver())
+    for level in OUTPUT_LEVELS:
+        prepared = adapter.prepare_request({"project": "Demo"}, "Do it", output_level=level)
+        assert prepared.render().startswith("OUTPUT STYLE: ")
+    assert "Return only the result" in adapter.prepare_request({}, "x", output_level="max").render()
+    assert "Answer directly." in adapter.prepare_request({}, "x").render()
+    with pytest.raises(ValueError):
+        adapter.prepare_request({}, "x", output_level="caveman")

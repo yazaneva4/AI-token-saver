@@ -8,6 +8,15 @@ def fakes(log):
     return {"claude": run}
 
 
+def test_auto_default_reports_detail_and_prefer():
+    log = []
+    res = delegate("summary", "x", main="opus", runners=fakes(log), env={})
+    assert log == [("haiku", "low")] and res["detail"]["chosen"] == "one:haiku"
+    log.clear()
+    res = delegate("plan", "x", main="sonnet", prefer="quality", runners=fakes(log), env={})
+    assert log == [("opus", "high")] and res["mode"] == "auto"
+
+
 def test_default_opus_runs_sonnet_and_compacts():
     log = []
     res = delegate("edit", "do it", main="opus", runners=fakes(log), env={})
@@ -15,7 +24,7 @@ def test_default_opus_runs_sonnet_and_compacts():
 
 
 def test_solo_and_router_run_nothing():
-    for m, mode in (("opus", "solo"), ("sonnet", "solo"), ("haiku", "solo"), ("haiku", None)):
+    for m, mode in (("opus", "solo"), ("sonnet", "solo"), ("haiku", "solo"), ("haiku", "router")):
         log = []
         res = delegate("architecture", "design", main=m, mode=mode, runners=fakes(log), env={})
         assert log == [] and res["steps"] == []

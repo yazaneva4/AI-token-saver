@@ -251,11 +251,12 @@ The main model is always the manager. Pick a mode per task:
 
 | Mode | Behavior |
 |---|---|
+| auto (default) | Scores solo / one-model / mix on quality, cost, speed and main-model tokens; picks the best for `--prefer` (default `balanced`) |
 | solo | No sub-agents; the main model does it |
 | one | One sub-agent model (`--model`; default Opus->Sonnet, Sonnet->Haiku) |
 | mix | Best model per tier (Haiku/Sonnet/Opus); ultra adds Sonnet draft + Opus verifier |
 | router | Advice only: best model and what the main model should do (default for Haiku) |
 
-Any main model can use any mode and any sub-agent model (e.g. Opus with Haiku, Sonnet with Opus, Haiku solo/mix/one). Default with no mode: Opus and Sonnet use `one`, Haiku uses `router`.
+Any main model can use any mode and any sub-agent model (e.g. Opus with Haiku, Sonnet with Opus, Haiku solo/mix/one). `auto` is the default for every main model: it drops plans below a quality floor, then scores the rest (balanced = quality 0.5, cost 0.2, speed 0.2, main tokens 0.1; also `quality`, `cheap`, `fast`, `tokens`) and reports the choice and main-model tokens saved. Models are the latest of each family. Cost/speed/quality figures are relative estimates in `model_router.py`, not live prices.
 
 Executor effort follows the task tier (low / medium / high; ultra work runs at high). Set the main model with `--main` or `AITS_MAIN_MODEL` (default `sonnet`) and the mode with `--mode` or `AITS_SUBAGENT_MODE`; override aliases with `AITS_OPUS_MODEL`, `AITS_SONNET_MODEL`, `AITS_HAIKU_MODEL`. Examples: `python delegate.py --kind edit --main opus --prompt-file task.txt` (default), `--main sonnet --mode one --model opus`, `--main haiku --mode mix`, `--mode solo`, `--mode router`. Models, aliases, and subscription limits may change.

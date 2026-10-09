@@ -1,16 +1,17 @@
-"""Main-model-aware sub-agent routing over the user's Claude CLI subscription.
+"""Main-model-aware sub-agent routing over signed-in CLIs (Claude, Codex/GPT, or custom).
 
-No API keys are used. The main model decides the team:
-  opus   -> Opus is the manager (plans, reviews); Sonnet is the executor.
-  sonnet -> Sonnet is the manager; Haiku is the executor.
-  haiku  -> Haiku only routes: it names the best model for the task and what
-            the main model should do. Nothing is delegated.
+No API keys are used. The main model is always the manager. Quality tiers are
+provider-neutral (haiku=light, sonnet=standard, opus=deep): a GPT or Gemini main model
+gets sub-agents from whatever models its machine can reach in the same tiers, falling
+back to the nearest available tier. See providers.py for configuration.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
 import shlex
+
+import providers as _providers
 
 LOW, MEDIUM, HIGH, ULTRA = "low", "medium", "high", "ultra"
 LOW_KINDS = {"search", "lookup", "fetch", "rename", "format", "summary", "image", "image_gen"}
@@ -31,10 +32,11 @@ _EFFORT = {LOW: "low", MEDIUM: "medium", HIGH: "high", ULTRA: "high"}
 
 @dataclass(frozen=True)
 class Step:
-    cli: str  # "claude"
+    cli: str  # provider name: "claude", "codex", or a custom provider
     model: str
     effort: str
     role: str = "executor"
+    argv_template: tuple[str, ...] = ()  # custom providers: argv with {model}/{effort} placeholders
 
 
 @dataclass(frozen=True)
@@ -44,26 +46,27 @@ class Route:
     mode: str
     steps: tuple[Step, ...]
     advice: str = ""
+    main_provider: str = ""
     detail: dict = field(default_factory=dict, compare=False)  # auto: chosen plan + scores
 
 
 def normalize_main(main: str | None) -> str:
-    """Map any model id/alias to opus, sonnet, or haiku (default sonnet)."""
-    m = (main or "").lower()
-    for name in ("opus", "sonnet", "haiku"):
-        if name in m:
-            return name
-    return "sonnet"
-
-
-def _model(name: str, env: dict[str, str]) -> str:
-    return env.get(f"AITS_{name.upper()}_MODEL") or name
+    """Map any model id/alias (Claude, GPT, Gemini, ...) to its tier: opus, sonnet or haiku."""
+    return _providers.tier_of_model(main)
 
 
 def command(step: Step, output_file: str | None = None) -> list[str]:
     """Argv for one subscription-backed subagent; prompt goes on stdin."""
+    if step.argv_template:
+        return [part.format(model=step.model, effort=step.effort) for part in step.argv_template]
     if step.cli == "claude":
         return ["claude", "-p", "--model", step.model, "--effort", step.effort]
+    if step.cli == "codex":
+        argv = ["codex", "exec", "--skip-git-repo-check"]
+        if step.model:  # empty means the CLI's own default model
+            argv += ["-m", step.model]
+        argv += ["-c", f'model_reasoning_effort="{step.effort}"']
+        return argv + (["-o", output_file] if output_file else []) + ["-"]
     raise ValueError(f"unknown cli {step.cli!r}")
 
 
@@ -104,7 +107,7 @@ REVIEW = 0.15          # share of the task the manager spends reviewing delegate
 VERIFY = 0.5           # a verifier pass reads and corrects, so it costs half a full pass
 
 
-def _candidates(main: str, tier: str, tokens: int) -> list[dict]:
+def _candidates(main: str, tier: str, tokens: int, ranks: tuple[str, ...] = MODELS) -> list[dict]:
     """Every plan the optimizer may pick, with quality/cost/speed/main-token estimates."""
     q = lambda m: QUALITY[m][tier]
     solo = {"name": f"solo:{main}", "mode": SOLO, "models": (),
@@ -121,18 +124,34 @@ def _candidates(main: str, tier: str, tokens: int) -> list[dict]:
         out.append({"name": name, "mode": mode, "models": tuple(models), "quality": min(1.0, quality),
                     "cost": cost, "speed": speed, "main_tokens": REVIEW * tokens})
 
-    for m in MODELS:
+    for m in ranks:
         delegated(f"one:{m}", ONE, [m])
-    if tier in (HIGH, ULTRA):
+    if tier in (HIGH, ULTRA) and "sonnet" in ranks and "opus" in ranks:
         delegated("mix:sonnet+opus", MIX, ["sonnet", "opus"])
     return out
 
 
-def _auto(main: str, tier: str, prefer: str, tokens: int, env: dict[str, str]) -> Route:
+def _steps(cat: dict, names, effort: str, main_name: str | None) -> tuple[Step, ...]:
+    """Concrete steps for tier names, using the first provider that offers each tier."""
+    steps = []
+    for i, name in enumerate(names):
+        provider, model, _ = _providers.resolve(cat, name, main_name)
+        steps.append(Step(provider, model, effort, "executor" if i == 0 else "verifier",
+                          tuple(cat[provider]["argv"] or ())))
+    return tuple(steps)
+
+
+def _available_ranks(cat: dict, main_name: str | None) -> tuple[str, ...]:
+    """Tiers that some provider can actually serve (a missing tier maps to the nearest one)."""
+    found = {r[2] for rank in MODELS if (r := _providers.resolve(cat, rank, main_name))}
+    return tuple(rank for rank in MODELS if rank in found)
+
+
+def _auto(main: str, tier: str, prefer: str, tokens: int, cat: dict, main_name: str | None) -> Route:
     if prefer not in PREFER:
         raise ValueError(f"unknown preference {prefer!r}; use one of {tuple(PREFER)}")
     tokens = max(tokens, 1000)
-    cands = _candidates(main, tier, tokens)
+    cands = _candidates(main, tier, tokens, _available_ranks(cat, main_name))
     ok = [c for c in cands if c["quality"] >= QUALITY_FLOOR] or [max(cands, key=lambda c: c["quality"])]
     best = {k: min(c[k] for c in ok) for k in ("cost", "speed", "main_tokens")}
     wq, wc, ws, wt = PREFER[prefer]
@@ -144,18 +163,19 @@ def _auto(main: str, tier: str, prefer: str, tokens: int, env: dict[str, str]) -
     detail = {"prefer": prefer, "chosen": pick["name"], "main_tokens_saved": solo_main - pick["main_tokens"],
               "scores": {c["name"]: round(c["score"], 3) for c in ok}}
     effort = _EFFORT[tier]
-    steps = tuple(Step("claude", _model(m, env), effort, "executor" if i == 0 else "verifier")
-                  for i, m in enumerate(pick["models"]))
+    steps = _steps(cat, pick["models"], effort, main_name)
+    detail["resolved"] = [f"{s.cli}:{s.model or 'default'}" for s in steps]
     if not steps:
         advice = f"{main} (main) does this {tier}-tier task itself; no sub-agent beats it on {prefer}."
     else:
         advice = (f"{main} manages (plans, reviews, owns the final answer); auto chose {pick['name']} "
                   f"for {tier}-tier work ({prefer}).")
-    return Route(tier, main, AUTO, steps, advice, detail)
+    return Route(tier, main, AUTO, steps, advice, _providers.provider_of_model(main_name) or "", detail)
 
 
 def route(kind: str, *, main: str | None = None, mode: str | None = None, model: str | None = None,
-          prefer: str | None = None, tokens: int = 0, env: dict[str, str] | None = None) -> Route:
+          prefer: str | None = None, tokens: int = 0, env: dict[str, str] | None = None,
+          providers: dict | None = None) -> Route:
     """Plan sub-agents for a task. The main model is always the manager.
 
     mode: auto (default: score solo/one/mix on quality, cost, speed and main-model
@@ -164,16 +184,19 @@ def route(kind: str, *, main: str | None = None, mode: str | None = None, model:
     stronger verifier), router (advice only). Any main model may use any model.
     """
     env = os.environ if env is None else env
-    main = normalize_main(main or env.get("AITS_MAIN_MODEL"))
+    main_name = main or env.get("AITS_MAIN_MODEL")  # as given: may be a GPT, Gemini or Claude model id
+    main = normalize_main(main_name)
+    cat = _providers.catalog(env, providers)
+    main_provider = _providers.provider_of_model(main_name) or ""
     mode = (mode or env.get("AITS_SUBAGENT_MODE") or DEFAULT_MODE[main]).lower()
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r}; use one of {MODES}")
     tier = classify(kind, tokens=tokens)
     effort = _EFFORT[tier]
     if mode == AUTO:
-        return _auto(main, tier, (prefer or env.get("AITS_PREFER") or "balanced").lower(), tokens, env)
+        return _auto(main, tier, (prefer or env.get("AITS_PREFER") or "balanced").lower(), tokens, cat, main_name)
     if mode == SOLO:
-        return Route(tier, main, SOLO, (), f"{main} (main) does this task itself; no sub-agents.")
+        return Route(tier, main, SOLO, (), f"{main} (main) does this task itself; no sub-agents.", main_provider)
     if mode == ROUTER:
         best = BEST_MODEL[tier]
         if best == main:
@@ -181,15 +204,17 @@ def route(kind: str, *, main: str | None = None, mode: str | None = None, model:
         else:
             advice = (f"Best model for this {tier}-tier task: {best}. Main model ({main}) should hand it to "
                       f"{best} (or ask the user to switch) and relay the result.")
-        return Route(tier, main, ROUTER, (), advice)
+        return Route(tier, main, ROUTER, (), advice, main_provider)
+    if not cat:
+        return Route(tier, main, SOLO, (), f"{main} (main) does this task itself; no sub-agent provider is available.", main_provider)
+    ranks = _available_ranks(cat, main_name)
     if mode == ONE:
-        m = normalize_main(model) if model else DEFAULT_ONE[main]
-        names = [m]
+        want = normalize_main(model) if model else DEFAULT_ONE[main]
+        names = [_providers.resolve(cat, want, main_name)[2]]
     else:  # MIX
-        names = [BEST_MODEL[tier]]
-        if tier == ULTRA:
+        names = [_providers.resolve(cat, BEST_MODEL[tier], main_name)[2]]
+        if tier == ULTRA and "sonnet" in ranks and "opus" in ranks:
             names = ["sonnet", "opus"]  # draft, then stronger verification
-    steps = tuple(Step("claude", _model(n, env), effort, "executor" if i == 0 else "verifier")
-                  for i, n in enumerate(names))
+    steps = _steps(cat, names, effort, main_name)
     advice = f"{main} manages (plans, reviews, owns the final answer); {mode} sub-agents: {', '.join(names)}."
-    return Route(tier, main, mode, steps, advice)
+    return Route(tier, main, mode, steps, advice, main_provider)

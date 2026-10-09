@@ -255,8 +255,12 @@ The main model is always the manager. Pick a mode per task:
 | solo | No sub-agents; the main model does it |
 | one | One sub-agent model (`--model`; default Opus->Sonnet, Sonnet->Haiku) |
 | mix | Best model per tier (Haiku/Sonnet/Opus); ultra adds Sonnet draft + Opus verifier |
-| router | Advice only: best model and what the main model should do (default for Haiku) |
+| router | Advice only: best model and what the main model should do |
 
 Any main model can use any mode and any sub-agent model (e.g. Opus with Haiku, Sonnet with Opus, Haiku solo/mix/one). `auto` is the default for every main model: it drops plans below a quality floor, then scores the rest (balanced = quality 0.5, cost 0.2, speed 0.2, main tokens 0.1; also `quality`, `cheap`, `fast`, `tokens`) and reports the choice and main-model tokens saved. Models are the latest of each family. Cost/speed/quality figures are relative estimates in `model_router.py`, not live prices.
 
 Executor effort follows the task tier (low / medium / high; ultra work runs at high). Set the main model with `--main` or `AITS_MAIN_MODEL` (default `sonnet`) and the mode with `--mode` or `AITS_SUBAGENT_MODE`; override aliases with `AITS_OPUS_MODEL`, `AITS_SONNET_MODEL`, `AITS_HAIKU_MODEL`. Examples: `python delegate.py --kind edit --main opus --prompt-file task.txt` (default), `--main sonnet --mode one --model opus`, `--main haiku --mode mix`, `--mode solo`, `--mode router`. Models, aliases, and subscription limits may change.
+
+## Output levels
+
+`provider_adapter.prepare_request(state, request, output_level=...)` selects how terse the reply instruction is: `standard` (default), `tight` (short plain sentences, no recap), or `max` (result only: the code, command, value, or diff, plus one full-sentence line for any blocker or warning). Every level keeps grammar, exact technical payloads, and full-sentence warnings, so it never degrades into telegraphic "caveman" speech, and this skill takes precedence if such a skill is also active. Savings depend on the task: large when the answer is a command or patch, small when it needs explanation. They are never guaranteed.

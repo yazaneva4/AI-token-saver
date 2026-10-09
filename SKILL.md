@@ -75,7 +75,38 @@ keeping every fact needed to act correctly.
   Use plain, complete wording for content persisted outside chat, including
   code comments, docs, commits, memory, and messages.
 - Do not imitate caveman grammar or use invented abbreviations. Save words,
-  never meaning.
+  never meaning. If a caveman-style or other telegraphic-speech skill is also
+  active, this skill takes precedence: write in plain grammatical language, and
+  never use telegraphic style for warnings, errors, commits, docs, or memory.
+
+### Output levels (choose the lowest that serves the request)
+
+| Level | Behavior | Typical use |
+|---|---|---|
+| standard | Answer first; drop filler and recaps | default |
+| tight | Short plain sentences; no preamble, recap, or offers of more help | status updates, explanations |
+| max | Result only: the code, command, value, or diff; one full-sentence line for a blocker or warning | when the answer is the artifact |
+
+At `max`, savings can exceed 90% on tasks whose answer is a command, value, or
+patch, because the explanation is the only thing removed. They are small on tasks
+that need explanation. Never exceed what the user's requested detail allows, and
+never drop error text, security warnings, or confirmation requests at any level.
+Hosts select the level with `prepare_request(..., output_level=...)`.
+
+### How savings reach up to 99%
+
+Real reductions come from not sending or generating tokens, not from deleting meaning:
+
+- **Context:** send deltas and stable references instead of repeating history;
+  offload bulky work to a cheaper sub-agent so the main context holds only the
+  result (the `auto` optimizer reports main-model tokens saved); compact repeated
+  or padded text with the deterministic compactor.
+- **Output:** use the lowest output level that serves the request; return the
+  artifact, not a narration of it.
+
+Reductions near 99% happen on highly repetitive input or result-only answers; they
+are never promised. Measure with the provider's meter or a matching tokenizer and
+report the actual number.
 
 Provider-neutral host integrations can include the compact answer-style instruction from `provider_adapter.py` before generation. It steers the assistant toward concise output while preserving explicit detail requirements; it cannot enforce a length or guarantee a reduction.
 

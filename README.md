@@ -250,7 +250,7 @@ still depends on the supplied tokenizer matching the target model.
 
 ## Sub-agent plan (main-model-aware)
 
-`model_router.py` routes sub-agent work through the user's signed-in Claude CLI subscription. It does not require API keys. This routing is only for user-requested sub-agent work. Output-saving behavior is provider-neutral and belongs to the host adapter, not this router.
+`model_router.py` routes sub-agent work through the user's signed-in CLIs (Claude, Codex/GPT, or custom). It does not require API keys. This routing is only for user-requested sub-agent work. Output-saving behavior is provider-neutral and belongs to the host adapter, not this router.
 
 The main model is always the manager. Pick a mode per task:
 
@@ -290,3 +290,15 @@ Compaction is split into levels, and redaction is kept apart from all of them:
 `RealtimeUsageSaver(..., suppress_unchanged=True)` holds output until `finish()` and emits nothing when the input matches the saved fingerprint. The default still streams immediately and reports repetition through `result.changed`.
 
 Known limits: a bare unquoted identifier assigned to a secret key outside a call (`password = hunter2`) is redacted, because it cannot be told apart from a `.env` secret. Redaction matches key names, not values, so a secret under another name is not found. Detection of code and log lines is heuristic. `python benchmarks/audit_compare.py` compares token counts, time and peak memory against a baseline git ref.
+
+## Other agents and providers (GPT, Gemini, local models)
+
+The tiers are provider-neutral: Haiku = light, Sonnet = standard, Opus = deep. `--main gpt-5` (or `AITS_MAIN_MODEL`) places the main model in a tier by name, and sub-agents come from the providers available in the *same tier*, preferring the main model's own provider. A missing tier falls back to the nearest one; with no provider the main model works alone, and no Claude model is used when Claude is not available.
+
+| Setting | Meaning |
+|---|---|
+| `AITS_PROVIDERS` / `--providers` | Providers in preference order. Default: detect installed `claude` and `codex` CLIs, else `claude` |
+| `AITS_<PROVIDER>_<LIGHT\|STANDARD\|DEEP>_MODEL` | Model for a tier, e.g. `AITS_CODEX_DEEP_MODEL=...`. Codex uses its own default model for the standard tier |
+| `AITS_CUSTOM_PROVIDERS` | JSON such as `{"mycli": {"cmd": "mycli --model {model} --effort {effort}", "light": "...", "deep": "..."}}`; the prompt goes on stdin |
+
+Python hosts can pass the models they can reach directly: `route("edit", main="gpt-5", providers={"codex": {"light": "...", "standard": "...", "deep": "..."}})`. Model names change often, so none are hard-coded beyond Claude's aliases. Tier placement is a name heuristic, so check `route(...).steps` for an unusual model id.

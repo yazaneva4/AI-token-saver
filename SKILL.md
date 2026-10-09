@@ -236,9 +236,31 @@ context, but provider-side limits remain controlled by the provider.
 
 ## Sub-agent Plan (main-model-aware, subscription-backed, no API)
 
-Use the user's authenticated Claude CLI subscription for delegated work. Do not
-require API keys or send tasks to paid API endpoints. If the CLI is unavailable
-or not signed in, report that clearly and continue directly where reasonable.
+Use the user's already signed-in CLIs (Claude, Codex/GPT, or a custom provider) for
+delegated work. Do not require API keys or send tasks to paid API endpoints. If no
+CLI is available or signed in, report that clearly and continue directly where
+reasonable.
+
+### Any agent, any provider
+
+The tiers are provider-neutral. **Haiku = light, Sonnet = standard, Opus = deep.**
+A GPT, Gemini or local main model is placed in a tier by its name (`mini`, `nano`,
+`flash`, `lite` = light; `pro`, `ultra`, `max`, `o3` = deep; otherwise standard) and
+gets sub-agents from the models actually available, in the same tier as the Claude
+model it replaces. Rules:
+
+1. Ask for a tier, not a vendor model. Use the first available provider that has it,
+   starting with the main model's own provider.
+2. If a tier is missing, use the nearest tier that exists (ties go to the stronger
+   one) and say so. If no provider is available, the main model works alone.
+3. Never name a Claude model when Claude is not available.
+4. Hosts with their own sub-agent tool can skip the CLIs: call `route(..., providers={...})`
+   with the models they can reach, then launch the returned tiers themselves.
+
+Configure with `AITS_PROVIDERS` (preference order, default: detect installed `claude`
+and `codex`), `AITS_<PROVIDER>_<LIGHT|STANDARD|DEEP>_MODEL` (for example
+`AITS_CODEX_DEEP_MODEL`; Codex defaults to its own model for the standard tier), and
+`AITS_CUSTOM_PROVIDERS` for any other CLI that reads a prompt on stdin.
 
 The main model is always the manager: it plans, reviews, and owns the final
 answer. Pick one sub-agent mode per task:
@@ -292,8 +314,9 @@ model aliases, and usage limits depend on the provider and may change.
 
 `python delegate.py --kind <kind> --main <opus|sonnet|haiku> [--mode auto|solo|one|mix|router] [--prefer balanced|quality|cheap|fast|tokens] [--model <m>] --prompt-file task.txt [--context-file ctx.txt] [--json]`
 compacts context, runs the planned sub-agents (or returns advice for solo/router),
-compacts the answer, and prints it (`--json`: tier, main, manager, steps, tokens in/out). The `claude` CLI must be
-installed and authenticated with the user's subscription.
+compacts the answer, and prints it (`--json`: tier, main, mode, steps, optimizer detail, tokens in/out). `--main` accepts any
+model id (`gpt-5`, `gemini-pro`, ...) and `--providers codex,claude` sets the preference order. Each provider's CLI must be installed and
+signed in with the user's subscription.
 
 ### Choosing a mode
 

@@ -243,6 +243,10 @@ reasonable.
 
 ### Any agent, any provider
 
+Tiers are labels matched by model name, not a power comparison between vendors:
+this skill never judges whether a GPT model is stronger or weaker than a Claude
+model, it only places each model in the tier its own name says.
+
 The tiers are provider-neutral. **Haiku = light, Sonnet = standard, Opus = deep.**
 A GPT, Gemini or local main model is placed in a tier by its name (`mini`, `nano`,
 `flash`, `lite` = light; `pro`, `ultra`, `max`, `o3` = deep; otherwise standard) and

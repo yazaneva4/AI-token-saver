@@ -243,17 +243,14 @@ Early / experimental implementation. Token counting is approximate unless a trus
 model-specific tokenizer or token-counting function is supplied. Exact accounting
 still depends on the supplied tokenizer matching the target model.
 
-## Tiered subscription routing
+## Sub-agent plan (main-model-aware)
 
-`model_router.py` routes through the user's signed-in Codex and Claude CLI subscriptions. It does not require API keys. This routing is only for user-requested sub-agent work. Output-saving behavior is provider-neutral and belongs to the host adapter, not this model-tier router.
+`model_router.py` routes sub-agent work through the user's signed-in Claude CLI subscription. It does not require API keys. This routing is only for user-requested sub-agent work. Output-saving behavior is provider-neutral and belongs to the host adapter, not this router.
 
-| Tier | Tasks | Route |
+| Main model | Manager | Executor |
 |---|---|---|
-| Low | Search, lookup, formatting, simple summaries | Latest Sonnet via Claude CLI, low effort |
-| Medium | Normal edits, implementation, tests, docs, analysis | GPT-6 Luna via Codex, medium effort |
-| High | Architecture, hard debugging, security, research | Latest Sonnet via Claude CLI, high effort |
-| Ultra | Critical work, releases, migrations, large codebases | GPT-6 Luna and latest Sonnet work together; one at medium effort, the other at high, depending on task |
+| Opus | Opus | Sonnet |
+| Sonnet | Sonnet | Haiku |
+| Haiku | none (router only) | none; recommends the best model (Haiku/Sonnet/Opus by task tier) and what the main model should do |
 
-Regular low-tier tasks route to Sonnet at low effort. Image-generation tasks are an exception and route to GPT-6 Luna at low effort. This requires image-generation capability in the host environment; the CLI route alone does not add an image tool.
-
-Set `AITS_GPT_MODEL` and `AITS_SONNET_MODEL` to override model aliases. `AITS_LUNA_MODEL` remains a legacy fallback for Codex. Defaults are `luna` (GPT-6 Luna) and `sonnet` (latest Sonnet). Use `python delegate.py --kind edit --prompt-file task.txt` to run a routed sub-agent task. Ultra effort is task-dependent: large features/codebases use GPT high + Sonnet medium; critical fixes, releases, migrations, and size-based ultra work use GPT medium + Sonnet high. Both use the user's subscriptions through the two CLIs, not API calls. Models, aliases, and subscription limits may change.
+Executor effort follows the task tier (low / medium / high; ultra work runs at high). Set the main model with `--main` or `AITS_MAIN_MODEL` (default `sonnet`); override aliases with `AITS_OPUS_MODEL`, `AITS_SONNET_MODEL`, `AITS_HAIKU_MODEL`. Use `python delegate.py --kind edit --main opus --prompt-file task.txt` to run a routed sub-agent task. Models, aliases, and subscription limits may change.

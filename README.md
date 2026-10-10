@@ -28,9 +28,10 @@ It provides:
 The default mode is intentionally conservative:
 
 - The default (`dedupe="off"`) removes **no line**. Repeated lines such as `Payment received`, `Turn left` or `The project is ready.` may be separate events, instructions or messages, and punctuation or keywords cannot tell them apart from padding.
-- `dedupe="runs"` is safe: a long run of identical consecutive prose lines becomes the line plus `[previous line repeated N more times]`, only when that is shorter, so the count survives and the original can be rebuilt.
+- `dedupe="runs"` is safe: a long run of identical consecutive prose lines becomes the line plus `[previous line repeated N more times]`, only when that is shorter, so the count survives, and `expand_runs` rebuilds the original exactly.
 - `dedupe="adjacent"` and `dedupe="global"` (the same as `aggressive=True`) are **lossy**: they drop repeated prose lines and the repeat count is gone.
 - Code, commands, closing braces, paths, JSON/YAML, SQL, Markdown headings, tables, quotes and list items, `key: value` lines, logs and other event records are **never** changed by any mode, even when they appear before any line that proves the input is code.
+- Credentials, API keys and config values are never detected, masked or rewritten (see [Credentials](#credentials-and-configuration-values)).
 - Indentation, speaker labels, message boundaries and chronological order are preserved.
 - For memory lists, merging may use global exact-line deduplication because those entries are structured facts rather than executable source code.
 
@@ -119,6 +120,7 @@ installation method can vary. The core memory-saving rules remain provider-agnos
 AI-token-saver/
 ├── SKILL.md                  # the skill
 ├── README.md
+├── ai-token-saver.zip        # ready-to-install skill package (SKILL.md plus the Python modules)
 ├── ai_token_saver.py         # core compaction engine (Python API)
 ├── context_saver.py          # context snapshots
 ├── usage_saver.py            # idempotent usage checkpoints
@@ -131,6 +133,10 @@ AI-token-saver/
 ├── tests/                    # test suite
 └── .github/workflows/        # CI (tests.yml)
 ```
+
+## Installing the skill
+
+`ai-token-saver.zip` in the repository root is the packaged skill: a single `ai-token-saver/` folder holding `SKILL.md` and the Python modules (no `redaction.py`). Upload it wherever your assistant accepts a skill package (for example Claude's Skills settings), or unzip it into the assistant's skills directory. It is rebuilt from `main` when the code changes; the zip is not needed to use the Python library.
 
 ## Quick start
 
@@ -149,18 +155,21 @@ Technical-looking content remains protected.
 ## Python usage
 
 ```python
-from ai_token_saver import Memory, compact_text, compact_text_with_metrics, memory_to_text, reduction
+from ai_token_saver import Memory, compact_text, compact_text_with_metrics, expand_runs, memory_to_text, reduction
 
 text = """We need to save the project state.
+We need to save the project state.
 We need to save the project state.
 OpenSpark is the current project.
 """
 
-compacted = compact_text(text)
+print(compact_text(text) == text)  # True: the default returns the text unchanged
+compacted = compact_text(text, dedupe="runs")  # exactly reversible
 print(compacted)
+print(expand_runs(compacted) == text)  # True
 print(f"Reduction: {reduction(text, compacted):.1%}")
 
-result = compact_text_with_metrics(text)
+result = compact_text_with_metrics(text, dedupe="runs")
 print(f"Input tokens:  {result.in_tokens}")
 print(f"Output tokens: {result.out_tokens}")
 print(f"Saved tokens:  {result.in_tokens - result.out_tokens}")
@@ -233,7 +242,7 @@ in them that must not be stored.
 
 ## Status
 
-Early / experimental implementation. Token counting is approximate unless a trusted
+Early / experimental implementation (Round 4: no redaction, default identity, reversible `runs`). Token counting is approximate unless a trusted
 model-specific tokenizer or token-counting function is supplied. Exact accounting
 still depends on the supplied tokenizer matching the target model.
 

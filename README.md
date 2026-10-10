@@ -4,7 +4,7 @@ A compact, model-agnostic token and context-saving tool designed to work with **
 
 ## What it does
 
-AI Token Saver performs **real, measured compaction**. By default it collapses runs of blank lines (one blank line is kept between paragraphs) and removes **adjacent duplicate prose lines** while preserving meaningful content. It deliberately never removes code, structured data, Markdown structure, list items or log/event records, because repeated lines there can be intentional.
+AI Token Saver performs **real, measured compaction**. By default it **keeps every line**: it only collapses runs of blank lines (one blank line is kept between paragraphs) and normalises line endings, because a repeated line can be a separate event, instruction or message. Removing repeats is opt-in through `dedupe=`: `"runs"` replaces a long run of identical lines by the line plus a count (information-preserving), while `"adjacent"` and `"global"` (and `aggressive=True`) are **explicitly lossy**. Code, structured data, Markdown structure, list items and log/event records are never touched in any mode.
 
 It also supports **real-time incremental compaction**: chunks can be fed as they arrive, and newly completed safe lines are emitted immediately instead of waiting for the complete input.
 
@@ -13,7 +13,7 @@ For highly repetitive or padded input, the implementation can sometimes reach **
 It provides:
 
 - 🧠 Compact project-memory structures
-- 🛡️ Code-aware conservative duplicate removal
+- 🛡️ Code-aware, information-preserving by default; repeated-line removal is opt-in
 - ⚡ Real-time incremental/streaming compaction
 - 📦 Stable, structured JSON memory storage
 - 🔀 Memory merging and deduplication
@@ -26,10 +26,11 @@ It provides:
 
 The default mode is intentionally conservative:
 
-- Repeated prose lines are removed only when they are adjacent, and only lines that read as plain prose can be removed at all.
-- Code, commands, closing braces, paths, JSON/YAML, SQL, Markdown headings, tables, quotes and list items, `key: value` lines, logs and other event records are **never deduplicated**, even when they appear before any line that proves the input is code.
-- Indentation and exact technical content are preserved.
-- If you explicitly enable `aggressive=True`, removal of repeated prose becomes global, with the same protections as above.
+- The default (`dedupe="off"`) removes **no line**. Repeated lines such as `Payment received`, `Turn left` or `The project is ready.` may be separate events, instructions or messages, and punctuation or keywords cannot tell them apart from padding.
+- `dedupe="runs"` is safe: a long run of identical consecutive prose lines becomes the line plus `[previous line repeated N more times]`, only when that is shorter, so the count survives and the original can be rebuilt.
+- `dedupe="adjacent"` and `dedupe="global"` (the same as `aggressive=True`) are **lossy**: they drop repeated prose lines and the repeat count is gone.
+- Code, commands, closing braces, paths, JSON/YAML, SQL, Markdown headings, tables, quotes and list items, `key: value` lines, logs and other event records are **never** changed by any mode, even when they appear before any line that proves the input is code.
+- Indentation, speaker labels, message boundaries and chronological order are preserved.
 - For memory lists, merging may use global exact-line deduplication because those entries are structured facts rather than executable source code.
 
 This is important: **AI Token Saver is a redundancy remover, not a semantic code optimizer.** When uncertain, it keeps information rather than risking behavior changes.
@@ -113,7 +114,7 @@ from ai_token_saver import compact_text
 safe = compact_text("api_key=SECRET123", redaction_mode="common")
 ```
 
-Redaction is a safety layer, **not a credential manager or a guarantee of secret detection**.
+Redaction is best-effort pattern matching, **not a security boundary, a credential manager or a guarantee of secret detection**. It cannot find a secret stored under a name it does not recognise, and a missed secret is sent on as written. Keep real credentials out of the text you compact in the first place.
 
 ## Available for AI assistants
 
@@ -156,7 +157,7 @@ cd AI-token-saver
 [Python usage](#python-usage) below. Without a supplied model tokenizer, token
 measurements are labeled approximate.
 
-For stronger prose deduplication, call `compact_text(text, aggressive=True)`.
+To remove repeated lines, pass `dedupe="runs"` (keeps a count) or the lossy `dedupe="adjacent"` / `aggressive=True`.
 Technical-looking content remains protected.
 
 ## Python usage
@@ -199,7 +200,7 @@ python -m pytest
 GitHub Actions runs the test suite on pushes and pull requests across Python
 3.10 through 3.13.
 
-The test suite covers safe adjacent deduplication, code preservation, aggressive-mode
+The test suite covers the repeated-line modes, code preservation, aggressive-mode
 safety, newline preservation, exact/approximate token measurement, reduction bounds,
 memory merging, JSON round-tripping, malformed-memory handling, redaction modes,
 real-time chunked compaction, CRLF chunks, and input validation.
@@ -283,8 +284,10 @@ Compaction is split into levels, and redaction is kept apart from all of them:
 | Level | What it does | Lossless? |
 |---|---|---|
 | Normalisation | Line endings (`\r\n`, `\r`) become `\n`; only these three are line breaks, so U+2028, form feeds and similar stay in the text | Yes, apart from line endings |
-| Conservative (default) | Drops runs of blank lines beyond one paragraph break and consecutive duplicate **prose** lines. Only plain prose can be dropped: code, JSON/YAML, Markdown structure (headings, tables, quotes, rules, indented and fenced code), list items, `key: value` and `key=value` lines, shell commands, closing braces, and log/event records (timestamps, syslog, glog, logfmt, `ERROR`/`FAILED` levels) are never deduplicated, even before any later line shows the input is code | No |
-| Intentionally lossy | `aggressive=True` removes any repeated prose line anywhere (same protections as above) | No |
+| Default (`dedupe="off"`) | Collapses blank-line runs beyond one paragraph break. Removes **no** line. Code keeps its blank lines exactly | Yes, apart from blank-line runs and line endings |
+| `dedupe="runs"` | A long run of identical consecutive **prose** lines becomes the line plus `[previous line repeated N more times]`, only when that is shorter. Never applied to code, structured data, Markdown structure, list items, paths, counts or log/event records | Yes: the count is kept and the original can be rebuilt. An input line that already looks like a marker is ambiguous for machine decoding |
+| `dedupe="adjacent"` | Drops a prose line identical to the previous one | **No: lossy**, the repeat count is lost |
+| `dedupe="global"` / `aggressive=True` | Drops any repeated prose line anywhere | **No: lossy** |
 | Redaction | Replaces credentials with `[REDACTED]`; see below | No, never counted as lossless |
 
 `compact_text` and `compact_stream` use one engine, so for any chunking, including one character at a time and splits inside `\r\n`, streaming output equals batch output. When the final input line is a removed duplicate and the input has no final newline, the output ends with one newline because a stream cannot take back a newline it already sent. Conservative mode is idempotent. Aggressive mode decides over a 4-line lookahead window, so a second pass may remove more but never adds content.
@@ -293,9 +296,28 @@ Compaction is split into levels, and redaction is kept apart from all of them:
 
 `RealtimeUsageSaver(..., suppress_unchanged=True)` holds output until `finish()` and emits nothing when the input matches the saved fingerprint (the held output grows with the input). The default still streams immediately and reports repetition through `result.changed`.
 
+## Reliability notes
+
+- **Memory files** (`save_memory`) are written atomically: a failed or interrupted save leaves the previous file intact, an existing file keeps its permissions, and a symlink is written through. `memory_to_text` indents continuation lines of a multi-line entry, so an entry cannot pose as a section header or another bullet. `Memory.from_dict` ignores booleans, NaN/infinity, nulls and containers in list fields.
+- **Fingerprints** of sets are independent of the process hash seed. `RealtimeUsageSaver` fingerprints now include the `dedupe` mode (format v2), so state saved by an older version counts as changed once. A `state_path` that is a directory is rejected up front.
+- **Custom providers** (`AITS_CUSTOM_PROVIDERS`): only `{model}` and `{effort}` are placeholders in a `cmd` template; every other brace is literal and there is no `{{ }}` escaping. The variable defines commands that will be run, so treat it as trusted configuration. A non-object provider spec or a non-string `cmd` is a `ValueError`.
+- **`delegate.py`** reports unreadable input files as `delegate: ...` with exit code 1, accepts `--dedupe off|runs|adjacent|global`, and `route()` rejects a non-string task kind with `TypeError`.
+- **Memory use**: per-line classification is cached only for short lines, and `dedupe="global"` remembers long lines as 16-byte digests, so a stream of long unique lines is not retained.
+
 ## Measured results (read before quoting a percentage)
 
-`python benchmarks/compression_round2.py` measures tokens with a real BPE tokenizer when `mistral-common` is installed (Tekken; **not Claude's tokenizer**) and checks that nothing was lost. On 1 MB-class datasets it reports about **99.99% for 16,000 identical lines (synthetic best case, nothing else)** and **0.00% to 0.3% for realistic data**: coding-agent transcripts, Python and JavaScript source, JSON, YAML, project-memory documents, prose and multilingual text. Real savings need repeated adjacent prose, which real code, logs and transcripts rarely contain. An earlier engine reported extra savings on JSON only by deleting equal neighbouring values, which changes the data; those savings are intentionally gone. `python benchmarks/stress_round2.py` runs bounded stress cases (1 KB to 100 MB, single-character chunks, malformed input, threads) and `python benchmarks/audit_compare.py` compares against a git baseline.
+`python benchmarks/compression_round2.py` compacts ten datasets (about 1 MB each) four ways with redaction **off**, so only compaction is measured, and counts tokens with the Tekken BPE tokenizer (a real subword tokenizer, **not Claude's**). "Intact" means every line and its repeat count is still present; "lossless" for `runs` means expanding the markers reproduces the input exactly.
+
+| Dataset | default | `runs` (lossless) | `adjacent` (lossy, lines dropped) |
+|---|---|---|---|
+| 16,000 identical lines, **synthetic best case** (180,323 tokens) | 0.00%, intact | 99.99% | 99.99% (16,392) |
+| Retry/poll output (repeated status lines, 193,020 tokens) | 0.00%, intact | 98.18% | 98.94% (26,584) |
+| Coding-agent transcript, Python, JavaScript, project memory, JSON, YAML, multilingual | 0.00%, intact | 0.00% | 0.00% (0) |
+| Non-repetitive prose | 0.04% | 0.04% | 0.04% |
+
+So: **99.8% and above is a best case that exists only for pure repetition**, and the default never claims it, because the default removes nothing. Typical coding-agent text, source code, JSON and YAML contain no adjacent repeated prose and save about 0% in every mode; real savings there would need a different technique. Parsed Python, JSON and YAML are identical to the input in every mode. An earlier engine reported extra savings on JSON only by deleting equal neighbouring values, which changes the data.
+
+`python benchmarks/stress_round2.py [--dedupe MODE] [--engine-dir DIR]` runs 69 bounded cases (1 KB to 100 MB, one-character chunks, random chunking, malformed input, 100,000 repeated lines, threads) in separate subprocesses with an 8 GB cap. On the reference machine all 69 pass in every mode; 100 MB inputs take 5 to 34 s (about 3 to 10 MB/s; secret-heavy text is the slowest) with working memory of roughly 3 times the input. `python benchmarks/audit_compare.py` compares against a git baseline.
 
 ## Other agents and providers (GPT, Gemini, local models)
 

@@ -19,7 +19,7 @@ We need to save the project state.
 The current router is OpenSpark.
 The current router is OpenSpark.
 """
-    result = compact_text(source)
+    result = compact_text(source, dedupe="adjacent")
     assert result.count("OpenSpark") == 1
     assert "need to save the project state" in result
     assert estimate_tokens(result) < estimate_tokens(source)
@@ -43,7 +43,7 @@ def test_compaction_preserves_no_final_newline():
 def test_removed_duplicate_final_line_keeps_previous_newline():
     # A stream has already emitted "same\n" before it can know the last line is a
     # removed duplicate, so batch output matches the stream byte for byte.
-    assert compact_text("same\nsame", redact_secrets=False) == "same\n"
+    assert compact_text("same\nsame", redact_secrets=False, dedupe="adjacent") == "same\n"
 
 
 def test_aggressive_mode_does_not_globally_deduplicate_technical_content():
@@ -149,7 +149,7 @@ def test_compact_text_with_metrics_returns_all_fields():
 
 def test_compact_text_with_metrics_shows_real_savings():
     repetitive = "duplicate\n" * 100 + "unique\n"
-    result = compact_text_with_metrics(repetitive)
+    result = compact_text_with_metrics(repetitive, dedupe="adjacent")
     assert result.reduction_percent > 0.9
     assert result.in_tokens > result.out_tokens
 
@@ -161,6 +161,7 @@ def test_exact_token_counter_is_used_and_marked_exact():
     result = compact_text_with_metrics(
         "one two\none two\nthree\n",
         tokenizer=counter,
+        dedupe="adjacent",
     )
     assert result.in_tokens == 5
     assert result.out_tokens == 3
@@ -170,7 +171,7 @@ def test_exact_token_counter_is_used_and_marked_exact():
 
 
 def test_realtime_compactor_handles_split_chunks_and_deduplicates_adjacent_lines():
-    compactor = RealtimeCompactor(redact_secrets=False)
+    compactor = RealtimeCompactor(redact_secrets=False, dedupe="adjacent")
     assert compactor.feed("hello\nhel") == "hello\n"
     assert compactor.feed("lo\nhello\nworld") == ""
     assert compactor.finish() == "world"
@@ -186,7 +187,7 @@ def test_realtime_compactor_preserves_repeated_code_lines():
 
 
 def test_realtime_compactor_reports_metrics_after_finish():
-    compactor = RealtimeCompactor(redact_secrets=False)
+    compactor = RealtimeCompactor(redact_secrets=False, dedupe="adjacent")
     compactor.feed("same\nsame\nunique")
     compactor.finish()
     result = compactor.result()
@@ -198,9 +199,9 @@ def test_realtime_compactor_reports_metrics_after_finish():
 
 def test_compact_stream_is_incremental_and_matches_compaction():
     chunks = ["one\n", "two\n", "two\nthree", "\n"]
-    output = "".join(compact_stream(chunks, redact_secrets=False))
+    output = "".join(compact_stream(chunks, redact_secrets=False, dedupe="adjacent"))
     assert output == "one\ntwo\nthree\n"
-    assert output == compact_text("one\ntwo\ntwo\nthree\n", redact_secrets=False)
+    assert output == compact_text("one\ntwo\ntwo\nthree\n", redact_secrets=False, dedupe="adjacent")
 
 
 def test_realtime_handles_split_crlf_without_extra_blank_output():

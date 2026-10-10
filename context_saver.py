@@ -11,7 +11,7 @@ import secrets
 import time
 from typing import Callable, Iterable, Mapping
 
-from ai_token_saver import _redact_secrets
+from ai_token_saver import _redact_secrets, check_state_path
 
 PRESERVED_FIELDS = ("project", "current_task", "decisions", "bugs", "fixes", "files", "commands", "tests", "services", "next_steps")
 
@@ -117,7 +117,7 @@ class ContextSaver:
     def __init__(self, *, last_fingerprint: str | None = None, state_path: str | os.PathLike[str] | None = None, lock_timeout: float = 5.0) -> None:
         if lock_timeout <= 0:
             raise ValueError("lock_timeout must be positive")
-        self.state_path = Path(state_path).expanduser() if state_path else None
+        self.state_path = check_state_path(state_path)
         self.lock_timeout = float(lock_timeout)
         self.last_fingerprint = last_fingerprint if last_fingerprint is not None else self._load_fingerprint()
         self.last_snapshot: ContextSnapshot | None = None
@@ -216,7 +216,8 @@ class ContextSaver:
         def values(name: str) -> tuple[str, ...]:
             raw = state.get(name, ())
             if isinstance(raw, str): raw = (raw,)
-            if not isinstance(raw, (list, tuple, set, frozenset)): return ()
+            if isinstance(raw, (set, frozenset)): raw = sorted(raw, key=str)  # set order varies per process
+            if not isinstance(raw, (list, tuple)): return ()
             return _dedupe(raw)
         return ContextSnapshot(
             project=_clean(state.get("project", "")), current_task=_clean(state.get("current_task", "")),

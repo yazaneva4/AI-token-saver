@@ -30,8 +30,8 @@ def split_at(text: str, cuts) -> list[str]:
 # ---------------------------------------------------------------- 1. batch == stream
 def test_technical_line_after_repeated_prose_is_identical_in_batch_and_stream():
     text = "note\nnote\nimport os\n"
-    assert compact_text(text) == "note\nimport os\n"
-    assert stream(text) == compact_text(text)
+    assert compact_text(text, dedupe="adjacent") == "note\nimport os\n"
+    assert stream(text, dedupe="adjacent") == compact_text(text, dedupe="adjacent")
 
 
 def test_code_after_prose_is_never_deduplicated():
@@ -128,7 +128,7 @@ def test_adjacent_identical_log_events_are_kept():
 
 
 def test_prose_duplicates_are_still_removed():
-    assert compact_text("The state is important.\nThe state is important.\n") == "The state is important.\n"
+    assert compact_text("The state is important.\nThe state is important.\n", dedupe="adjacent") == "The state is important.\n"
 
 
 def test_yaml_sequence_entries_and_list_items_are_kept():
@@ -138,7 +138,7 @@ def test_yaml_sequence_entries_and_list_items_are_kept():
 
 
 def test_lowercase_error_prose_is_not_treated_as_an_event():
-    assert compact_text("an error occurred\nan error occurred\n") == "an error occurred\n"
+    assert compact_text("an error occurred\nan error occurred\n", dedupe="adjacent") == "an error occurred\n"
 
 
 # ---------------------------------------------------------------- 6. realtime saver

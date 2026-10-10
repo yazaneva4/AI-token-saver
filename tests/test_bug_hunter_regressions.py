@@ -72,7 +72,7 @@ def test_metrics_report_output_growth_after_redaction():
 
 def test_metrics_report_real_savings_as_positive_change():
     text = "hello\nhello\nhello\n"
-    result = compact_text_with_metrics(text, redact_secrets=False, tokenizer=lambda value: len(value))
+    result = compact_text_with_metrics(text, redact_secrets=False, tokenizer=lambda value: len(value), dedupe="adjacent")
     assert not result.output_grew
     assert result.token_change_percent > 0
     assert result.reduction_percent > 0

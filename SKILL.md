@@ -28,7 +28,7 @@ information merely to reach a percentage.
 4. Preserve exact names, file paths, commands, model names, versions, APIs,
    configuration values, technical decisions, and error text when important.
 5. Never invent missing information.
-6. Deduplicate conservatively; similar-looking lines are not automatically duplicates.
+6. Never drop a repeated line by default: a repeat can be a separate event, instruction or message. Use `dedupe="runs"` (keeps a count) to shorten long runs, and treat `adjacent`/`global`/`aggressive` as lossy.
 7. Prefer compact structured records over repeated prose.
 8. Replace clearly outdated values with current values while retaining useful
    history when needed.
@@ -74,7 +74,7 @@ keeping every fact needed to act correctly.
 - State security warnings and confirmation requests in full, clear sentences.
   Use plain, complete wording for content persisted outside chat, including
   code comments, docs, commits, memory, and messages.
-- Only plain prose lines may be dropped as duplicates. Compaction never removes code,
+- Repeated lines are kept unless the user opts in. Even in the opt-in modes only plain prose lines are touched; compaction never removes code,
   JSON/YAML, Markdown structure, list items, `key: value` lines, shell commands, or
   log/event records, and keeps one blank line between paragraphs. Redaction is lossy
   and is never described as lossless compression.
@@ -321,7 +321,7 @@ model aliases, and usage limits depend on the provider and may change.
 
 ### Automated runner
 
-`python delegate.py --kind <kind> --main <opus|sonnet|haiku> [--mode auto|solo|one|mix|router] [--prefer balanced|quality|cheap|fast|tokens] [--model <m>] --prompt-file task.txt [--context-file ctx.txt] [--json]`
+`python delegate.py --kind <kind> --main <opus|sonnet|haiku> [--mode auto|solo|one|mix|router] [--dedupe off|runs|adjacent|global] [--prefer balanced|quality|cheap|fast|tokens] [--model <m>] --prompt-file task.txt [--context-file ctx.txt] [--json]`
 compacts context, runs the planned sub-agents (or returns advice for solo/router),
 compacts the answer, and prints it (`--json`: tier, main, mode, steps, optimizer detail, tokens in/out). `--main` accepts any
 model id (`gpt-5`, `gemini-pro`, ...) and `--providers codex,claude` sets the preference order. Each provider's CLI must be installed and

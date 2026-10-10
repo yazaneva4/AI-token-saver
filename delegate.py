@@ -59,12 +59,12 @@ RUNNERS: dict[str, Runner] = {"claude": run_claude, "codex": run_codex}
 def delegate(kind: str, prompt: str, context: str = "", *, main: str | None = None,
              mode: str | None = None, model: str | None = None, prefer: str | None = None,
              runners: dict[str, Runner] | None = None, env: dict[str, str] | None = None,
-             providers: dict | None = None) -> dict:
+             providers: dict | None = None, dedupe: str | None = None) -> dict:
     """Compact context, run the planned sub-agents (verifier reviews draft), compact the answer."""
     runners = runners or RUNNERS
     r = route(kind, main=main, mode=mode, model=model, prefer=prefer, tokens=estimate_tokens(prompt + context), env=env,
               providers=providers)
-    full = compact_text(f"{context}\n\n{prompt}" if context else prompt)
+    full = compact_text(f"{context}\n\n{prompt}" if context else prompt, dedupe=dedupe)
     base = {"tier": r.tier, "main": r.main, "mode": r.mode,
             "steps": [f"{s.cli}:{s.model}:{s.effort}:{s.role}" for s in r.steps],
             "tokens_in": estimate_tokens(full), "detail": r.detail}
@@ -75,7 +75,7 @@ def delegate(kind: str, prompt: str, context: str = "", *, main: str | None = No
         p = full if i == 0 else (
             f"Verify and correct this draft. Return the final answer only.\n\nTASK:\n{full}\n\nDRAFT:\n{out}")
         out = (runners.get(step.cli) or run_command)(step, p)
-    out = compact_text(out)
+    out = compact_text(out, dedupe=dedupe)
     return {**base, "tokens_out": estimate_tokens(out), "result": out}
 
 
@@ -90,16 +90,22 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--model", help="sub-agent tier or model id for --mode one (opus/deep, sonnet/standard, haiku/light, or any model id)")
     a.add_argument("--prefer", choices=["balanced", "quality", "cheap", "fast", "tokens"],
                    help="auto priority (default balanced)")
+    a.add_argument("--dedupe", choices=["off", "runs", "adjacent", "global"],
+                   help="repeated-line handling for context and answers: off (default, keeps every line), runs (count-preserving), adjacent/global (lossy)")
     a.add_argument("--providers", help="comma list of providers to use, in preference order (default: detect)")
     a.add_argument("--json", action="store_true")
     n = a.parse_args(argv)
-    prompt = open(n.prompt_file, encoding="utf-8").read()
-    ctx = open(n.context_file, encoding="utf-8").read() if n.context_file else ""
     try:
+        with open(n.prompt_file, encoding="utf-8") as handle:
+            prompt = handle.read()
+        ctx = ""
+        if n.context_file:
+            with open(n.context_file, encoding="utf-8") as handle:
+                ctx = handle.read()
         env = dict(os.environ)
         if n.providers:
             env["AITS_PROVIDERS"] = n.providers
-        res = delegate(n.kind, prompt, ctx, main=n.main, mode=n.mode, model=n.model, prefer=n.prefer, env=env)
+        res = delegate(n.kind, prompt, ctx, main=n.main, mode=n.mode, model=n.model, prefer=n.prefer, env=env, dedupe=n.dedupe)
     except (RuntimeError, ValueError, OSError) as e:
         print(f"delegate: {e}", file=sys.stderr)
         return 1

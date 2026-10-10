@@ -19,8 +19,14 @@ def test_auto_default_reports_detail_and_prefer():
 
 def test_default_opus_runs_sonnet_and_compacts():
     log = []
-    res = delegate("edit", "do it", main="opus", runners=fakes(log), env={})
+    res = delegate("edit", "do it", main="opus", runners=fakes(log), env={}, dedupe="adjacent")
     assert log == [("sonnet", "medium")] and res["result"] == "answer\n"
+
+
+def test_default_delegate_keeps_repeated_lines_and_only_collapses_blank_runs():
+    log = []
+    res = delegate("edit", "do it", main="opus", runners=fakes(log), env={})
+    assert res["result"] == "answer\n\nanswer"
 
 
 def test_solo_and_router_run_nothing():

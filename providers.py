@@ -93,7 +93,7 @@ def catalog(env, providers=None) -> dict[str, dict]:
     host agent states exactly which models it can reach.
     """
     if providers is not None:
-        return {name: {"tiers": _tiers_from_spec(spec), "argv": _argv_from_spec(spec)}
+        return {name: {"tiers": _tiers_from_spec(_check_spec(name, spec)), "argv": _argv_from_spec(spec)}
                 for name, spec in providers.items()}
     custom = _custom(env)
     wanted = [p.strip() for p in env.get("AITS_PROVIDERS", "").split(",") if p.strip()]
@@ -107,7 +107,7 @@ def catalog(env, providers=None) -> dict[str, dict]:
     result: dict[str, dict] = {}
     for name in wanted:
         if name in custom:
-            result[name] = {"tiers": _tiers_from_spec(custom[name]), "argv": _argv_from_spec(custom[name])}
+            result[name] = {"tiers": _tiers_from_spec(_check_spec(name, custom[name])), "argv": _argv_from_spec(custom[name])}
         elif name in BUILTIN:
             tiers = dict(BUILTIN[name]["tiers"])
             for rank in RANKS:
@@ -118,6 +118,14 @@ def catalog(env, providers=None) -> dict[str, dict]:
         else:
             raise ValueError(f"unknown provider {name!r}; define it in AITS_CUSTOM_PROVIDERS or use one of {tuple(BUILTIN)}")
     return result
+
+
+def _check_spec(name, spec) -> dict:
+    if not isinstance(spec, dict):
+        raise ValueError(f"provider {name!r} must be configured with a JSON object, not {type(spec).__name__}")
+    if spec.get("cmd") is not None and not isinstance(spec["cmd"], str):
+        raise ValueError(f"provider {name!r}: cmd must be a string")
+    return spec
 
 
 def _tiers_from_spec(spec) -> dict[str, str]:

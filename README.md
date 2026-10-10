@@ -4,7 +4,7 @@ A compact, model-agnostic token and context-saving tool designed to work with **
 
 ## What it does
 
-AI Token Saver performs **real, measured compaction**. By default it removes blank lines and **adjacent duplicate non-empty lines** while preserving meaningful content. It deliberately avoids global duplicate removal for code-like or structured technical content because repeated lines can be intentional.
+AI Token Saver performs **real, measured compaction**. By default it collapses runs of blank lines (one blank line is kept between paragraphs) and removes **adjacent duplicate prose lines** while preserving meaningful content. It deliberately never removes code, structured data, Markdown structure, list items or log/event records, because repeated lines there can be intentional.
 
 It also supports **real-time incremental compaction**: chunks can be fed as they arrive, and newly completed safe lines are emitted immediately instead of waiting for the complete input.
 
@@ -26,10 +26,10 @@ It provides:
 
 The default mode is intentionally conservative:
 
-- Repeated prose lines are removed only when they are adjacent.
-- Repeated code, commands, paths, JSON/YAML, SQL, logs, and other technical-looking content is **not globally deduplicated**.
+- Repeated prose lines are removed only when they are adjacent, and only lines that read as plain prose can be removed at all.
+- Code, commands, closing braces, paths, JSON/YAML, SQL, Markdown headings, tables, quotes and list items, `key: value` lines, logs and other event records are **never deduplicated**, even when they appear before any line that proves the input is code.
 - Indentation and exact technical content are preserved.
-- If you explicitly enable `aggressive=True`, global duplicate removal is still disabled for content that looks technical.
+- If you explicitly enable `aggressive=True`, removal of repeated prose becomes global, with the same protections as above.
 - For memory lists, merging may use global exact-line deduplication because those entries are structured facts rather than executable source code.
 
 This is important: **AI Token Saver is a redundancy remover, not a semantic code optimizer.** When uncertain, it keeps information rather than risking behavior changes.
@@ -102,7 +102,7 @@ does **not** independently verify that the supplied counter matches the target m
 Secret-looking values are redacted by default. You can choose:
 
 - `off` — no redaction
-- `common` — common API-key/password/token patterns
+- `common` — key-name based secrets (`password`, `secret`, `api_key`, `access_token`, ... including `DB_PASSWORD`-style names, in `.env`, JSON, YAML and Python), Bearer/Basic headers, `sk-`/AWS/GitHub/Slack tokens, JWTs, URL credentials and PEM private keys
 - `strict` — common patterns plus additional Google-style key detection
 
 Example:
@@ -132,13 +132,15 @@ AI-token-saver/
 ├── SKILL.md                  # the skill
 ├── README.md
 ├── ai_token_saver.py         # core compaction engine (Python API)
+├── redaction.py              # secret redaction (lossy, separate from compaction)
 ├── context_saver.py          # context snapshots
 ├── usage_saver.py            # idempotent usage checkpoints
 ├── realtime_usage_saver.py   # real-time incremental saver
 ├── provider_adapter.py       # provider-neutral integration and output levels
+├── providers.py              # provider/tier catalog for sub-agents
 ├── model_router.py           # sub-agent routing and auto optimizer
 ├── delegate.py               # command-line runner for routed sub-agents
-├── benchmarks/               # benchmark runner
+├── benchmarks/               # benchmark runner, savings, audit, compression and stress benchmarks
 ├── tests/                    # test suite
 └── .github/workflows/        # CI (tests.yml)
 ```
@@ -281,15 +283,19 @@ Compaction is split into levels, and redaction is kept apart from all of them:
 | Level | What it does | Lossless? |
 |---|---|---|
 | Normalisation | Line endings (`\r\n`, `\r`) become `\n`; only these three are line breaks, so U+2028, form feeds and similar stay in the text | Yes, apart from line endings |
-| Conservative (default) | Drops runs of blank lines beyond one paragraph break and consecutive duplicate prose lines. Code, JSON, log/event records, list items and `key: value` lines are never deduplicated; code keeps its blank lines exactly | No |
-| Intentionally lossy | `aggressive=True` removes any repeated prose line (same protections as above) | No |
-| Redaction | Replaces credentials with `[REDACTED]`. Quoted values keep their quotes so JSON and Python stay parseable; calls, attribute access, subscripts and `$VAR` references (`password = get_pw()`) are left alone | No, never counted as lossless |
+| Conservative (default) | Drops runs of blank lines beyond one paragraph break and consecutive duplicate **prose** lines. Only plain prose can be dropped: code, JSON/YAML, Markdown structure (headings, tables, quotes, rules, indented and fenced code), list items, `key: value` and `key=value` lines, shell commands, closing braces, and log/event records (timestamps, syslog, glog, logfmt, `ERROR`/`FAILED` levels) are never deduplicated, even before any later line shows the input is code | No |
+| Intentionally lossy | `aggressive=True` removes any repeated prose line anywhere (same protections as above) | No |
+| Redaction | Replaces credentials with `[REDACTED]`; see below | No, never counted as lossless |
 
-`compact_text` and `compact_stream` use one engine, so for any chunking, including one character at a time and splits inside `\r\n`, streaming output equals batch output. When the final input line is a removed duplicate and the input has no final newline, the output ends with one newline because a stream cannot take back a newline it already sent.
+`compact_text` and `compact_stream` use one engine, so for any chunking, including one character at a time and splits inside `\r\n`, streaming output equals batch output. When the final input line is a removed duplicate and the input has no final newline, the output ends with one newline because a stream cannot take back a newline it already sent. Conservative mode is idempotent. Aggressive mode decides over a 4-line lookahead window, so a second pass may remove more but never adds content.
 
-`RealtimeUsageSaver(..., suppress_unchanged=True)` holds output until `finish()` and emits nothing when the input matches the saved fingerprint. The default still streams immediately and reports repetition through `result.changed`.
+**Redaction** (`redact_secrets`, mode `common` or `strict`) masks, by key name or token shape: `password`/`secret`/`api_key`/`access_token`/`auth_token`/`private_key`/`passwd` values including prefixed and suffixed names (`DB_PASSWORD`, `client_secret`), Bearer/Basic/Token headers, `sk-` keys, AWS access key ids, GitHub and Slack tokens, JWTs, `scheme://user:password@host` URLs, and PEM private keys (the BEGIN/END lines stay). Quoted values keep their quotes; arrays and objects under a secret key keep their shape with every scalar masked, including across lines. Code that only reads a secret (`password = get_password()`, `self.password = password`, `connect(password=pw)`, `os.environ[...]`, `$VAR`) is left alone, so Python and JSON stay parseable. Limits: matching is by key name, so a secret under an unrecognised name is not found; a bare identifier assigned to a secret key (`password = hunter2`) is redacted because it cannot be told apart from a `.env` value; a secret array or private key that never closes stops being masked after 500 lines.
 
-Known limits: a bare unquoted identifier assigned to a secret key outside a call (`password = hunter2`) is redacted, because it cannot be told apart from a `.env` secret. Redaction matches key names, not values, so a secret under another name is not found. Detection of code and log lines is heuristic. `python benchmarks/audit_compare.py` compares token counts, time and peak memory against a baseline git ref.
+`RealtimeUsageSaver(..., suppress_unchanged=True)` holds output until `finish()` and emits nothing when the input matches the saved fingerprint (the held output grows with the input). The default still streams immediately and reports repetition through `result.changed`.
+
+## Measured results (read before quoting a percentage)
+
+`python benchmarks/compression_round2.py` measures tokens with a real BPE tokenizer when `mistral-common` is installed (Tekken; **not Claude's tokenizer**) and checks that nothing was lost. On 1 MB-class datasets it reports about **99.99% for 16,000 identical lines (synthetic best case, nothing else)** and **0.00% to 0.3% for realistic data**: coding-agent transcripts, Python and JavaScript source, JSON, YAML, project-memory documents, prose and multilingual text. Real savings need repeated adjacent prose, which real code, logs and transcripts rarely contain. An earlier engine reported extra savings on JSON only by deleting equal neighbouring values, which changes the data; those savings are intentionally gone. `python benchmarks/stress_round2.py` runs bounded stress cases (1 KB to 100 MB, single-character chunks, malformed input, threads) and `python benchmarks/audit_compare.py` compares against a git baseline.
 
 ## Other agents and providers (GPT, Gemini, local models)
 

@@ -24,7 +24,7 @@ class RealtimeUsageResult:
 def state_fingerprint(text: str, *, redaction_mode: RedactionMode = "common", aggressive: bool = False) -> str:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    payload = f"v1\0{redaction_mode}\0{int(aggressive)}\0{text}".encode("utf-8")
+    payload = f"v1\0{redaction_mode}\0{int(aggressive)}\0{text}".encode("utf-8", "surrogatepass")
     return hashlib.sha256(payload).hexdigest()
 
 

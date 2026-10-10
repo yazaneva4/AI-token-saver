@@ -48,7 +48,7 @@ def test_code_like_repeats_survive_before_any_code_hint(code):
 
 def test_repeated_prose_before_code_is_still_deduplicated_and_code_is_kept():
     text = "We looked at it.\nWe looked at it.\nfoo();\nfoo();\n"
-    assert keep(text) == "We looked at it.\nfoo();\nfoo();\n"
+    assert keep(text, dedupe="adjacent") == "We looked at it.\nfoo();\nfoo();\n"
 
 
 # ======================================================== repeated events
@@ -498,7 +498,7 @@ def test_paths_labels_and_counts_are_never_deduplicated(text):
 
 def test_plain_text_without_a_timestamp_or_level_is_still_treated_as_prose():
     # Documented limit: "Connection refused" looks like a sentence, so adjacent repeats collapse.
-    assert keep("Connection refused\nConnection refused\n") == "Connection refused\n"
+    assert keep("Connection refused\nConnection refused\n", dedupe="adjacent") == "Connection refused\n"
 
 
 @pytest.mark.parametrize("text,expected", [

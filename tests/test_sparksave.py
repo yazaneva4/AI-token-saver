@@ -7,7 +7,7 @@ We need to save the project state.
 The current router is OpenSpark.
 The current router is OpenSpark.
 """
-    result = compact_text(source)
+    result = compact_text(source, dedupe="adjacent")
     assert result.count("OpenSpark") == 1
     assert "need to save the project state" in result
     assert estimate_tokens(result) < estimate_tokens(source)

@@ -13,7 +13,7 @@ import statistics
 import time
 from typing import Callable, Iterable
 
-from ai_token_saver import Memory, RealtimeCompactor, compact_stream, compact_text_with_metrics, merge_memory
+from ai_token_saver import Memory, RealtimeCompactor, compact_stream, compact_text, compact_text_with_metrics, estimate_tokens, merge_memory
 
 
 @dataclass
@@ -35,22 +35,22 @@ def _measure(name: str, text: str, fn: Callable[[str], str], repeats: int = 3) -
         start = time.perf_counter()
         output = fn(text)
         timings.append((time.perf_counter() - start) * 1000.0)
-    metrics = compact_text_with_metrics(text, redact_secrets=False)
+    input_tokens, output_tokens = estimate_tokens(text), estimate_tokens(output)  # of THIS run's output
     return BenchmarkResult(
         name=name,
         elapsed_ms=statistics.median(timings),
         input_chars=len(text),
         output_chars=len(output),
-        input_tokens=metrics.in_tokens,
-        output_tokens=metrics.out_tokens,
-        reduction_percent=metrics.token_change_percent,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        reduction_percent=(1.0 - output_tokens / input_tokens) * 100.0 if input_tokens else 0.0,
         passed=isinstance(output, str) and len(output) <= len(text),
     )
 
 
 def _stream_compact(text: str, chunk_size: int) -> str:
     chunks = (text[i : i + chunk_size] for i in range(0, len(text), chunk_size))
-    return "".join(compact_stream(chunks, redact_secrets=False, aggressive=True))
+    return "".join(compact_stream(chunks, redact_secrets=False, dedupe="adjacent"))
 
 
 def run_benchmarks(*, deep: bool = False) -> list[BenchmarkResult]:
@@ -59,7 +59,11 @@ def run_benchmarks(*, deep: bool = False) -> list[BenchmarkResult]:
 
     for size in sizes:
         prose = ("The same project context appears here repeatedly.\n" * ((size // 50) + 1))[:size]
-        results.append(_measure(f"large-context-{size // 1_000_000 or 0}mb", prose, lambda value: compact_text_with_metrics(value, redact_secrets=False).compacted))
+        label = f"large-context-{size // 1_000_000 or 0}mb"
+        # Best case: pure repetition. Only the first two rows keep every occurrence's information.
+        results.append(_measure(f"{label}-default", prose, lambda value: compact_text(value, redact_secrets=False)))
+        results.append(_measure(f"{label}-runs-lossless", prose, lambda value: compact_text(value, redact_secrets=False, dedupe="runs")))
+        results.append(_measure(f"{label}-adjacent-LOSSY", prose, lambda value: compact_text(value, redact_secrets=False, dedupe="adjacent")))
 
     stream_text = ("hello world\n" * (50_000 if deep else 5_000))
     for chunk_size in (1, 10, 127):
@@ -67,12 +71,12 @@ def run_benchmarks(*, deep: bool = False) -> list[BenchmarkResult]:
         output = _stream_compact(stream_text, chunk_size)
         elapsed = (time.perf_counter() - start) * 1000.0
         results.append(BenchmarkResult(
-            name=f"streaming-chunk-{chunk_size}",
+            name=f"streaming-chunk-{chunk_size}-adjacent-LOSSY",
             elapsed_ms=elapsed,
             input_chars=len(stream_text),
             output_chars=len(output),
-            input_tokens=compact_text_with_metrics(stream_text, redact_secrets=False).in_tokens,
-            output_tokens=compact_text_with_metrics(output, redact_secrets=False).out_tokens,
+            input_tokens=estimate_tokens(stream_text),
+            output_tokens=estimate_tokens(output),
             reduction_percent=(1.0 - len(output) / max(1, len(stream_text))) * 100.0,
             passed=output == "hello world\n",
         ))

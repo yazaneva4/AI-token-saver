@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
+import re
 import shlex
 
 import providers as _providers
 
+_PLACEHOLDER = re.compile(r"\{(model|effort)\}")
 LOW, MEDIUM, HIGH, ULTRA = "low", "medium", "high", "ultra"
 LOW_KINDS = {"search", "lookup", "fetch", "rename", "format", "summary", "image", "image_gen"}
 MEDIUM_KINDS = {"edit", "implement", "tests", "docs", "analysis", "review"}
@@ -58,7 +60,9 @@ def normalize_main(main: str | None) -> str:
 def command(step: Step, output_file: str | None = None) -> list[str]:
     """Argv for one subscription-backed subagent; prompt goes on stdin."""
     if step.argv_template:
-        return [part.format(model=step.model, effort=step.effort) for part in step.argv_template]
+        values = {"model": step.model, "effort": step.effort}
+        # Only {model} and {effort} are placeholders; any other brace (JSON arguments, {}) stays as written.
+        return [_PLACEHOLDER.sub(lambda match: values[match.group(1)], part) for part in step.argv_template]
     if step.cli == "claude":
         return ["claude", "-p", "--model", step.model, "--effort", step.effort]
     if step.cli == "codex":
@@ -76,6 +80,8 @@ def shell(step: Step, output_file: str | None = None) -> str:
 
 def classify(kind: str, *, tokens: int = 0) -> str:
     """Pick a tier from a task kind; unknown kinds fall back to size."""
+    if not isinstance(kind, str):
+        raise TypeError("kind must be a string")
     k = kind.strip().lower().replace("-", "_").replace(" ", "_")
     for tier, kinds in ((LOW, LOW_KINDS), (ULTRA, ULTRA_KINDS), (HIGH, HIGH_KINDS), (MEDIUM, MEDIUM_KINDS)):
         if k in kinds:

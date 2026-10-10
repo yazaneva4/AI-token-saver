@@ -66,6 +66,7 @@ def run_case(case):
     """Runs inside the child process. Returns a result dict."""
     import ai_token_saver as m
     kind, size, mode = case["kind"], case["size"], case["mode"]
+    extra = {"dedupe": case["dedupe"]} if case.get("dedupe") else {}  # omitted: the engine's own default
     if mode == "special":
         text = special_input(kind, size)
     else:
@@ -74,7 +75,7 @@ def run_case(case):
     start = time.perf_counter()
     note = ""
     if mode == "batch":
-        out = m.compact_text(text)
+        out = m.compact_text(text, **extra)
     elif mode == "stream":
         sizes = {"fixed": [4096], "random": None, "char": [1]}[case["chunking"]]
         rng = random.Random(11)
@@ -84,16 +85,16 @@ def run_case(case):
             chunks.append(text[pos:pos + n])
             pos += n
         start = time.perf_counter()
-        out = "".join(m.compact_stream(chunks))
+        out = "".join(m.compact_stream(chunks, **extra))
         elapsed_stream = time.perf_counter() - start  # verification below is not part of the measurement
         if case.get("verify"):
-            note = "stream==batch" if out == m.compact_text(text) else "STREAM!=BATCH"
+            note = "stream==batch" if out == m.compact_text(text, **extra) else "STREAM!=BATCH"
     elif mode == "special":
-        out = m.compact_text(text)
+        out = m.compact_text(text, **extra)
     elif mode == "threads":
         outs = [None] * 8
         pieces = [text[i::8] for i in range(8)] if False else [text] * 8
-        threads = [threading.Thread(target=lambda i=i: outs.__setitem__(i, m.compact_text(pieces[i]))) for i in range(8)]
+        threads = [threading.Thread(target=lambda i=i: outs.__setitem__(i, m.compact_text(pieces[i], **extra))) for i in range(8)]
         start = time.perf_counter()
         [t.start() for t in threads]
         [t.join() for t in threads]
@@ -178,6 +179,7 @@ def main():
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--memory-gb", type=float, default=8)
     parser.add_argument("--only", help="substring filter on case ids")
+    parser.add_argument("--dedupe", choices=["off", "runs", "adjacent", "global"], help="repeated-line mode to measure (default: the engine's default)")
     parser.add_argument("--engine-dir", help="directory holding another ai_token_saver.py to measure (baseline)")
     parser.add_argument("--json")
     parser.add_argument("--child")
@@ -192,6 +194,8 @@ def main():
     for case in cases(args.max_mb):
         if args.only and args.only not in case["id"]:
             continue
+        if args.dedupe:
+            case["dedupe"] = args.dedupe
         try:
             done = subprocess.run([sys.executable, os.path.abspath(__file__), "--child", json.dumps(case)], capture_output=True, text=True,
                                   timeout=args.timeout, preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_AS, (limit, limit)))

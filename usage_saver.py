@@ -109,15 +109,18 @@ def normalize_saver_commands(message: str) -> tuple[str, ...]:
 
 def state_fingerprint(state: Mapping[str, object] | UsageCheckpoint | str) -> str:
     """Create a stable SHA-256 fingerprint for idempotency checks."""
-    if isinstance(state, UsageCheckpoint):
-        payload: object = state.normalized()
-    elif isinstance(state, Mapping):
-        payload = _normalize_mapping(state)
-    elif isinstance(state, str):
-        payload = _redact(state)
-    else:
-        raise TypeError("state must be a mapping, UsageCheckpoint, or string")
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8", "surrogatepass")
+    try:
+        if isinstance(state, UsageCheckpoint):
+            payload: object = state.normalized()
+        elif isinstance(state, Mapping):
+            payload = _normalize_mapping(state)
+        elif isinstance(state, str):
+            payload = _redact(state)
+        else:
+            raise TypeError("state must be a mapping, UsageCheckpoint, or string")
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8", "surrogatepass")
+    except RecursionError:
+        raise ValueError("state is nested too deeply or refers to itself") from None
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -136,7 +139,9 @@ def _normalize_mapping(value: Mapping[str, object]) -> dict[str, object]:
         safe_key = _redact(key)
         if isinstance(item, Mapping):
             result[safe_key] = _normalize_mapping(item)
-        elif isinstance(item, (list, tuple)):
+        elif isinstance(item, (list, tuple, set, frozenset)):
+            if isinstance(item, (set, frozenset)):
+                item = sorted(item, key=str)  # set order varies per process; the fingerprint must not
             result[safe_key] = [
                 _normalize_mapping(x) if isinstance(x, Mapping) else _normalize_scalar(x, key=key)
                 for x in item

@@ -38,7 +38,7 @@ def test_compaction_is_idempotent_for_repeated_saver_invocations():
 def test_large_context_compaction_preserves_a_canonical_line(repetitions: int):
     line = "The same project context appears here repeatedly.\n"
     text = line * repetitions
-    result = compact_text_with_metrics(text, redact_secrets=False)
+    result = compact_text_with_metrics(text, redact_secrets=False, dedupe="adjacent")
     assert result.compacted == line
     assert result.out_tokens <= result.in_tokens
 

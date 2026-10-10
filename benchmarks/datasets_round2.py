@@ -79,6 +79,18 @@ def agent_conversation(limit=1_000_000, seed=1):
     return ["".join(out)]
 
 
+def polling_output(limit=1_000_000, seed=9):
+    """Retry/poll output: a tool waiting on something prints the same status line over and over."""
+    rng = random.Random(seed)
+    out, size = [], 0
+    while size < limit:
+        status = rng.choice(["Waiting for deployment to finish...", "Retrying connection to the build server", "Still waiting for the queue to drain"])
+        block = f"{status}\n" * rng.randint(20, 400) + f"Step {rng.randint(1, 99)} finished: {rng.choice(['ok', 'ok', 'skipped'])}\n"
+        out.append(block)
+        size += len(block)
+    return ["".join(out)]
+
+
 def python_source(limit=1_000_000):
     docs = _read_files(["/usr/lib/python3.13/*.py"], limit, 2000)
     return docs or [f"def f{i}(x):\n    return x + {i}\n\n\n" * 1 for i in range(limit // 30)]
@@ -148,6 +160,7 @@ def multilingual(limit=1_000_000):
 DATASETS = {
     "repetitive synthetic (best case)": repetitive_synthetic,
     "coding-agent conversation": agent_conversation,
+    "retry/poll output (repeated status lines)": polling_output,
     "Python source (stdlib)": python_source,
     "JavaScript source (npm)": javascript_source,
     "project-memory documents": project_memory,

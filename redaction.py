@@ -49,7 +49,9 @@ _PEM_ONE_LINE = re.compile(r"(-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----).
 # Cheap pre-filter: a line with none of these cannot contain anything the patterns look for.
 # Applied to the lower-cased line: a case-sensitive alternation is several times faster than (?i).
 _TRIGGER = re.compile(r"pass|secret|key|token|bearer|begin|akia|asia|ghp_|gho_|ghu_|ghs_|ghr_|github_pat|xox|eyj|://|authorization|sk-|aiza")
-_SCALAR = re.compile(r"\"[^\"\\]*(?:\\.[^\"\\]*)*\"|'[^'\\]*(?:\\.[^'\\]*)*'|[A-Za-z0-9_.+-]+")
+# One token of a JSON / YAML-flow / Python-literal fragment: a string, a bare word, or a delimiter.
+_TOKEN = re.compile(r"\"[^\"\\]*(?:\\.[^\"\\]*)*\"|'[^'\\]*(?:\\.[^'\\]*)*'|[^\s,\[\]{}\"':][^\s,\[\]{}\"']*|\S")
+_KEEP_LITERALS = frozenset({"null", "true", "false", "none", "nil", "~"})
 _DOTTED = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+$")
 _CALL_ARGUMENTS = re.compile(r"[\w\])]\s*\([^()]*$")  # text ends inside "name(" ... unclosed
 _NUMERIC = re.compile(r"^[+-]?\d[\d_.eE+-]*$")
@@ -97,8 +99,32 @@ def _structure_end(text: str, start: int, depth: int = 0) -> tuple[int | None, i
     return None, depth
 
 
+def _is_key(segment: str, end: int, token: str) -> bool:
+    """True when the token just scanned is an object key: followed by a colon (or ending with one)."""
+    if token.endswith(":") and len(token) > 1 and token[0] not in "\"'":
+        return True  # YAML flow `{a: 1}`
+    i = end
+    while i < len(segment) and segment[i] in " \t":
+        i += 1
+    return i < len(segment) and segment[i] == ":"
+
+
 def _mask_scalars(segment: str) -> str:
-    return _SCALAR.sub(f'"{MARK}"', segment)
+    """Mask every *value* in a structure and leave object keys, brackets and layout alone, so the
+    result has the same keys (no duplicates), nesting and array lengths and stays valid JSON,
+    YAML-flow or Python. Strings and numbers become "[REDACTED]"; null/true/false stay."""
+    out, last = [], 0
+    for match in _TOKEN.finditer(segment):
+        token = match.group(0)
+        if token[0] in "[]{},#" or len(token) == 1 and not token.isalnum():
+            continue
+        if token.lower() in _KEEP_LITERALS or _is_key(segment, match.end(), token):
+            continue
+        out.append(segment[last:match.start()])
+        out.append(f'"{MARK}"')
+        last = match.end()
+    out.append(segment[last:])
+    return "".join(out)
 
 
 class SecretScanner:
@@ -163,9 +189,9 @@ class SecretScanner:
         if self._block_lines > _MAX_BLOCK_LINES:
             self._depth = 0
         if end is None:
-            return _mask_scalars(line)
+            return self._tokens(_mask_scalars(line))
         remainder = line[end:]  # e.g. `], "other": "value"`: may hold more secrets
-        return _mask_scalars(line[:end]) + (self._line(remainder) if remainder.strip() else remainder)
+        return self._tokens(_mask_scalars(line[:end])) + (self._line(remainder) if remainder.strip() else remainder)
 
     def _line(self, line: str) -> str:
         line = _PEM_ONE_LINE.sub(lambda m: f"{m.group(1)}{MARK}{m.group(2)}", line)
@@ -173,6 +199,10 @@ class SecretScanner:
         line = _AUTH_HEADER.sub(lambda m: m.group(1) + MARK, line)
         line = _URL_CREDENTIALS.sub(lambda m: m.group(1) + MARK + m.group(3), line)
         line = _BEARER.sub(lambda m: m.group(1) + MARK, line)
+        return self._tokens(line)
+
+    def _tokens(self, line: str) -> str:
+        """Mask credential-shaped tokens anywhere in the line, including object keys."""
         for pattern in _TOKEN_PATTERNS:
             line = pattern.sub(MARK, line)
         if self.mode == "strict":

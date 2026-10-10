@@ -47,8 +47,10 @@ def test_markdown_paragraph_boundaries_are_kept():
     assert stream(text) == text
 
 
-def test_blank_line_runs_collapse_to_one_in_prose():
-    assert compact_text("a\n\n\n\nb\n") == "a\n\nb\n"
+def test_blank_line_runs_are_kept_in_prose():
+    # Round 4: blank lines are content (Markdown, poems, YAML block scalars); nothing collapses them any more.
+    for mode in ("off", "runs", "adjacent", "global"):
+        assert compact_text("a\n\n\n\nb\n", dedupe=mode) == "a\n\n\n\nb\n"
 
 
 def test_code_keeps_blank_lines_exactly():
@@ -57,66 +59,15 @@ def test_code_keeps_blank_lines_exactly():
     assert stream(code, redact_secrets=False) == code
 
 
-def test_leading_and_trailing_blank_lines_dropped_in_prose():
-    assert compact_text("\n\nhello\n\n\n") == "hello\n"
+def test_leading_and_trailing_blank_lines_are_kept_in_prose():
+    for mode in ("off", "runs", "adjacent", "global"):
+        assert compact_text("\n\nhello\n\n\n", dedupe=mode) == "\n\nhello\n\n\n"
 
 
 # ---------------------------------------------------------------- 3. JSON secrets
-def test_json_secrets_are_redacted_and_json_stays_valid():
-    text = '{"api_key": "sk_live_abc123", "password": "hunter2", "secret": 12345, "name": "ok"}'
-    out = compact_text(text)
-    assert "sk_live_abc123" not in out and "hunter2" not in out and "12345" not in out
-    parsed = json.loads(out)
-    assert parsed["name"] == "ok" and parsed["password"] == "[REDACTED]"
-
-
-def test_yaml_secrets_are_redacted():
-    out = compact_text("db:\n  password: 'p@ss w0rd'\n  secret: \"abc def\"\n  host: example.org\n")
-    assert "p@ss" not in out and "abc def" not in out and "host: example.org" in out
-
-
-def test_quoted_values_with_spaces_do_not_leak():
-    assert "def" not in compact_text('password = "abc def"\n')
 
 
 # ---------------------------------------------------------------- 4. python semantics
-@pytest.mark.parametrize("source", [
-    "password = get_password()\n",
-    "password = os.environ['PW']\n",
-    "connect(password=pw, user=u)\n",
-    "cfg = {'password': pw}\n",
-    "if password == 'x':\n    pass\n",
-    "def f(password: str = 'x'):\n    return password\n",
-    "token_ok = password != other\n",
-])
-def test_redaction_keeps_python_parseable(source):
-    ast.parse(source)  # the sample itself is valid
-    ast.parse(compact_text(source))
-
-
-def test_calls_and_references_are_not_rewritten():
-    for line in ("password = get_password()", "secret = self.secret", "password=os.getenv('X')",
-                 "connect(password=pw)", "password = None"):
-        assert compact_text(line + "\n") == line + "\n"
-
-
-def test_annotated_literal_is_redacted():
-    out = compact_text('password: str = "hunter2"\n')
-    assert "hunter2" not in out
-    ast.parse(out)
-
-
-def test_comparison_is_not_an_assignment():
-    assert compact_text('if password == "x":\n    pass\n') == 'if password == "x":\n    pass\n'
-
-
-def test_prose_in_parentheses_is_still_redacted():
-    assert "hunter2" not in compact_text("(use password=hunter2)\n")
-
-
-def test_redaction_is_idempotent():
-    once = compact_text('{"password": "x"}\napi_key=abc\nBearer abcdefghijklmnop\n')
-    assert compact_text(once) == once
 
 
 # ---------------------------------------------------------------- 5. event records
@@ -198,8 +149,10 @@ def test_unicode_separators_are_not_line_breaks():
         assert compact_text(text, redact_secrets=False) == text
 
 
-def test_crlf_and_cr_are_normalised_to_lf():
-    assert compact_text("a\r\nb\rc\n") == "a\nb\nc\n"
+def test_crlf_and_cr_are_preserved_not_normalised():
+    # Round 4: the engine no longer rewrites line endings in any mode.
+    for mode in ("off", "runs", "adjacent", "global"):
+        assert compact_text("a\r\nb\rc\n", dedupe=mode) == "a\r\nb\rc\n"
 
 
 def test_empty_chunks_and_lone_cr_chunks():
@@ -229,23 +182,23 @@ def random_text(rng: random.Random) -> str:
 def test_random_streams_equal_batch_for_random_chunking(seed):
     rng = random.Random(seed)
     text = random_text(rng)
-    for aggressive in (False, True):
-        for mode in ("off", "common", "strict"):
-            batch = compact_text(text, redaction_mode=mode, aggressive=aggressive)
-            sizes = [rng.randint(1, 9) for _ in range(rng.randint(1, 5))]
-            assert stream(text, sizes, redaction_mode=mode, aggressive=aggressive) == batch
-            assert stream(text, (1,), redaction_mode=mode, aggressive=aggressive) == batch
+    for mode in ("off", "runs", "adjacent", "global"):
+        batch = compact_text(text, dedupe=mode)
+        sizes = [rng.randint(1, 9) for _ in range(rng.randint(1, 5))]
+        assert stream(text, sizes, dedupe=mode) == batch
+        assert stream(text, (1,), dedupe=mode) == batch
 
 
 @pytest.mark.parametrize("seed", range(300, 450))
 def test_random_output_is_idempotent_and_never_invents_lines(seed):
     rng = random.Random(seed)
     text = random_text(rng)
-    once = compact_text(text, redact_secrets=False)
+    assert compact_text(text) == text  # the default is the identity
+    once = compact_text(text, dedupe="adjacent")
     normalised = text.replace("\r\n", "\n").replace("\r", "\n")
     source_lines = set(normalised.split("\n"))
-    assert all(line in source_lines for line in once.split("\n"))
-    assert compact_text(once, redact_secrets=False) == once
+    assert all(line in source_lines for line in once.replace("\r\n", "\n").replace("\r", "\n").split("\n"))
+    assert compact_text(once, dedupe="adjacent") == once
 
 
 @pytest.mark.parametrize("seed", range(450, 600))
@@ -253,20 +206,9 @@ def test_random_event_and_code_lines_are_preserved(seed):
     rng = random.Random(seed)
     text = random_text(rng)
     normalised = text.replace("\r\n", "\n").replace("\r", "\n")
-    out = compact_text(text, redact_secrets=False, aggressive=bool(seed % 2))
+    out = compact_text(text, dedupe="global" if seed % 2 else "adjacent").replace("\r\n", "\n").replace("\r", "\n")
     for marker in ("ERROR db timeout", "2024-05-01 10:00:00 INFO ok", "    return x + 1", "x = 1"):
         assert out.count(marker) == normalised.count(marker), marker
-
-
-@pytest.mark.parametrize("seed", range(600, 700))
-def test_random_secrets_never_survive(seed):
-    rng = random.Random(seed)
-    value = "".join(rng.choice("abcdefXYZ0123456789") for _ in range(rng.randint(8, 20)))
-    templates = [f"password={value}", f'password = "{value}"', f'{{"secret": "{value}"}}', f"api_key: {value}",
-                 f"password: str = '{value}'", f'"api-key": "{value}"', f"Bearer {value.ljust(16, 'z')}"]
-    for template in templates:
-        out = compact_text(f"{template}\n")
-        assert value not in out, template
 
 
 @pytest.mark.parametrize("seed", range(700, 760))
@@ -299,16 +241,4 @@ def test_large_input_streams_equal_batch_and_unbroken_line_is_linear():
 
 
 # ---------------------------------------------------------------- shared redaction in the savers
-def test_context_saver_redacts_json_and_annotated_secrets():
-    from context_saver import ContextSaver
-    text = ContextSaver().build({"project": "p", "commands": [
-        '{"api_key": "sk_live_abc123", "password": "hunter2"}', 'password: str = "x"', "password = get_pw()",
-    ]}).to_text()
-    assert "sk_live_abc123" not in text and "hunter2" not in text and '"x"' not in text
-    assert "password = get_pw()" in text
 
-
-def test_usage_saver_redacts_json_secrets_and_google_keys():
-    from usage_saver import _redact
-    out = _redact('{"secret": "topsecretvalue", "k": "AIzaSyA1234567890abcdefghij"}')
-    assert "topsecretvalue" not in out and "AIzaSy" not in out

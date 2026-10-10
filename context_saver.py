@@ -11,20 +11,14 @@ import secrets
 import time
 from typing import Callable, Iterable, Mapping
 
-from ai_token_saver import _redact_secrets, check_state_path
+from ai_token_saver import check_state_path
 
 PRESERVED_FIELDS = ("project", "current_task", "decisions", "bugs", "fixes", "files", "commands", "tests", "services", "next_steps")
 
 
-def _redact(value: object) -> str:
-    """Redact credentials with the shared redactor (JSON/YAML/annotated and quoted values included)."""
-    if value is None:
-        return ""
-    return _redact_secrets(str(value).strip(), "common")
-
-
 def _clean(value: object) -> str:
-    return _redact(value)
+    """Text as given, trimmed. Values are never rewritten or masked."""
+    return "" if value is None else str(value).strip()
 
 
 def _dedupe(values: Iterable[object]) -> tuple[str, ...]:

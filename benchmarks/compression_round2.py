@@ -2,7 +2,7 @@
 
     python benchmarks/compression_round2.py [--size 1000000] [--json out.json]
 
-Every dataset is compacted four ways, with secret redaction OFF so that only compaction is measured:
+Every dataset is compacted four ways, (redaction no longer exists; only compaction is measured):
 
   default    dedupe="off"      keeps every line (collapses blank-line runs only). Information-preserving.
   runs       dedupe="runs"     long identical runs become the line plus a count. Information-preserving:
@@ -106,7 +106,7 @@ def run_mode(docs, mode):
     for doc in docs:
         tracemalloc.start()
         start = time.perf_counter()
-        outputs.append(engine.compact_text(doc, redact_secrets=False, dedupe=mode))
+        outputs.append(engine.compact_text(doc, dedupe=mode))
         seconds += time.perf_counter() - start
         peak = max(peak, tracemalloc.get_traced_memory()[1])
         tracemalloc.stop()
@@ -119,7 +119,7 @@ def main():
     parser.add_argument("--json")
     args = parser.parse_args()
     tok_name, count = tokenizer()
-    print(f"tokenizer: {tok_name}\ninput size target: {args.size} chars per dataset; redaction OFF (compaction only)\n")
+    print(f"tokenizer: {tok_name}\ninput size target: {args.size} chars per dataset\n")
     print(f"{'dataset':42}{'tok in':>9} | {'default':>8} {'intact':>7} | {'runs':>8} {'lossless':>9} | {'adjacent':>9} {'dropped':>8} | {'global':>8}  parse")
     rows = []
     for name, build in DATASETS.items():

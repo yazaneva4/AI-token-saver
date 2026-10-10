@@ -13,29 +13,13 @@ import json
 import re
 from typing import Any, Iterable, Mapping
 
-from ai_token_saver import _redact_secrets
-
 SAVER_ALIASES = frozenset({"/ai-token-saver", "/ai-usage-saver"})
 _SAVER_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9_-])/(?:ai-token-saver|ai-usage-saver)(?![A-Za-z0-9_-])")
-_SECRET_FIELD_RE = re.compile(
-    r"(?i)^(?:api[-_]?key|access[-_]?token|auth[-_]?token|token|password|secret)$"
-)
 
 
-def _redact(value: object) -> str:
-    """Redact credentials with the shared redactor in strict mode (also Google API keys)."""
-    if value is None:
-        return ""
-    return _redact_secrets(str(value).strip(), "strict")
-
-
-def _is_secret_field(name: object) -> bool:
-    return isinstance(name, str) and bool(_SECRET_FIELD_RE.fullmatch(name.strip()))
-
-
-def _redact_field_value(name: object, value: object) -> str:
-    text = _redact(value)
-    return "[REDACTED]" if text and _is_secret_field(name) else text
+def _text(value: object) -> str:
+    """Text as given, trimmed. Values are never masked."""
+    return "" if value is None else str(value).strip()
 
 
 @dataclass
@@ -47,10 +31,10 @@ class ServiceState:
     def normalized(self) -> dict[str, object]:
         values: dict[str, str] = {}
         for key, value in sorted(self.values.items(), key=lambda item: str(item[0])):
-            safe_value = _redact_field_value(key, value)
+            safe_value = _text(value)
             if safe_value:
-                values[_redact(key)] = safe_value
-        return {"name": _redact(self.name).upper(), "values": values}
+                values[_text(key)] = safe_value
+        return {"name": _text(self.name).upper(), "values": values}
 
 
 @dataclass
@@ -71,7 +55,7 @@ class UsageCheckpoint:
             seen: set[str] = set()
             result: list[str] = []
             for value in values:
-                value = _redact(value)
+                value = _text(value)
                 if not value or value in seen:
                     continue
                 seen.add(value)
@@ -88,8 +72,8 @@ class UsageCheckpoint:
                 services.append(normalized)
         services.sort(key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return {
-            "project": _redact(self.project),
-            "current_task": _redact(self.current_task),
+            "project": _text(self.project),
+            "current_task": _text(self.current_task),
             "completed": clean(self.completed),
             "in_progress": clean(self.in_progress),
             "blocked": clean(self.blocked),
@@ -115,7 +99,7 @@ def state_fingerprint(state: Mapping[str, object] | UsageCheckpoint | str) -> st
         elif isinstance(state, Mapping):
             payload = _normalize_mapping(state)
         elif isinstance(state, str):
-            payload = _redact(state)
+            payload = _text(state)
         else:
             raise TypeError("state must be a mapping, UsageCheckpoint, or string")
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8", "surrogatepass")
@@ -126,17 +110,17 @@ def state_fingerprint(state: Mapping[str, object] | UsageCheckpoint | str) -> st
 
 def _normalize_scalar(value: Any, *, key: object | None = None) -> object:
     if isinstance(value, str):
-        return _redact_field_value(key, value)
+        return _text(value)
     if value is None or isinstance(value, (int, float, bool)):
         return value
-    return _redact(value)
+    return _text(value)
 
 
 def _normalize_mapping(value: Mapping[str, object]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key in sorted(value, key=str):
         item = value[key]
-        safe_key = _redact(key)
+        safe_key = _text(key)
         if isinstance(item, Mapping):
             result[safe_key] = _normalize_mapping(item)
         elif isinstance(item, (list, tuple, set, frozenset)):

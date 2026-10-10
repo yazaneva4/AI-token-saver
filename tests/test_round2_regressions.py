@@ -12,7 +12,6 @@ import pytest
 
 from ai_token_saver import RealtimeCompactor, compact_stream, compact_text
 from realtime_usage_saver import RealtimeUsageSaver
-from redaction import SecretScanner, redact_secrets
 
 
 def stream(text, sizes=(1,), **kwargs):
@@ -25,8 +24,8 @@ def stream(text, sizes=(1,), **kwargs):
 
 
 def keep(text, **kwargs):
-    """compact_text with redaction off: structured input must come back unchanged."""
-    return compact_text(text, redact_secrets=False, **kwargs)
+    """compact_text: structured input must come back unchanged unless ``dedupe`` says otherwise."""
+    return compact_text(text, **kwargs)
 
 
 # ======================================================== late code detection
@@ -42,7 +41,7 @@ def keep(text, **kwargs):
 ])
 def test_code_like_repeats_survive_before_any_code_hint(code):
     assert keep(code) == code
-    assert stream(code, redact_secrets=False) == code
+    assert stream(code) == code
     assert keep(code, aggressive=True) == code
 
 
@@ -90,7 +89,8 @@ def test_fenced_code_blocks_keep_blank_lines_and_duplicates():
 
 
 def test_markdown_paragraph_boundary_is_one_blank_line():
-    assert keep("Para one is here.\n\n\n\nPara two is here.\n") == "Para one is here.\n\nPara two is here.\n"
+    text = "Para one is here.\n\n\n\nPara two is here.\n"  # Round 4: blank lines are no longer collapsed
+    assert keep(text) == text and keep(text, dedupe="runs") == text
 
 
 # ======================================================== JSON / YAML preservation
@@ -123,57 +123,12 @@ def test_yaml_documents_keep_their_meaning(doc):
 
 
 # ======================================================== redaction: syntax and coverage
-@pytest.mark.parametrize("source", [
-    'password = b"x"\n', "password = r'x'\n", 'password = f"{pw}"\n', 'password = "abc" "def"\n',
-    'cfg = {"password": ["a", "b"]}\n', 'cfg = {"secret": {"k": "v"}}\n', 'password: str = "hunter2"\n',
-    "def f(password: str = 'x'):\n    return password\n", "if password == 'x':\n    pass\n",
-    "self.password = password\n", "connect(password=pw, user=u)\n", "password = os.environ['PW']\n",
-    'DB_PASSWORD = "hunter2"\n', 'client_secret = "abcdef123456"\n',
-])
-def test_redaction_keeps_python_parseable(source):
-    ast.parse(source)
-    ast.parse(compact_text(source))
-
-
-@pytest.mark.parametrize("doc,secret", [
-    ('{"password": ["hunter2", "x"]}', "hunter2"), ('{"secret": {"v": "hunter2"}}', "hunter2"),
-    ('{\n  "password": [\n    "hunter2",\n    "second"\n  ],\n  "ok": 1\n}', "hunter2"),
-    ('{\n  "secret": {\n    "inner": "hunter2"\n  },\n  "ok": 1\n}', "hunter2"),
-    ('{"api_key": "hunter2", "n": 1}', "hunter2"), ('{"password": 12345}', "12345"),
-])
-def test_json_secrets_masked_and_json_still_valid(doc, secret):
-    out = compact_text(doc)
-    assert secret not in out and "second" not in out
-    parsed = json.loads(out)
-    if "ok" in parsed:
-        assert parsed["ok"] == 1
 
 
 def test_multiline_secret_block_does_not_swallow_following_content():
     doc = '{\n  "password": [\n    "a"\n  ],\n  "keep": "visible text",\n  "list": [1, 2]\n}'
     out = json.loads(compact_text(doc))
     assert out["keep"] == "visible text" and out["list"] == [1, 2]
-
-
-@pytest.mark.parametrize("text,secret", [
-    ("-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkq\nabcdEFGH\n-----END PRIVATE KEY-----\n", "MIIEvQ"),
-    ("-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH PRIVATE KEY-----\n", "b3Blbn"),
-    ("k AKIAIOSFODNN7EXAMPLE x\n", "AKIAIOSFOD"), ("t ghp_" + "a1B2c3D4" * 5 + " x\n", "ghp_a1B2"),
-    ("xoxb-123456789012-abcdefghijkl\n", "xoxb-1234"),
-    ("t eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQ\n", "SflKxw"),
-    ("postgres://admin:s3cr3tpass@db.local:5432/app\n", "s3cr3tpass"),
-    ("Authorization: Basic dXNlcjpwYXNzd29yZA==\n", "dXNlcjpw"), ("export DB_PASSWORD=s3cr3tpass\n", "s3cr3tpass"),
-    ("client_secret=abcdef123456\n", "abcdef123456"), ("MY_API_KEY=abcdef123456\n", "abcdef123456"),
-    ("[db]\npassword = s3cr3tpass\n", "s3cr3tpass"), ("spring.datasource.password=hunter2\n", "hunter2"),
-])
-def test_additional_secret_formats_are_masked(text, secret):
-    assert secret not in compact_text(text)
-    assert secret not in stream(text, (1,))
-
-
-def test_private_key_markers_stay_and_text_after_it_is_kept():
-    out = compact_text("a\n-----BEGIN PRIVATE KEY-----\nAAAA\nBBBB\n-----END PRIVATE KEY-----\nafter\n")
-    assert out == "a\n-----BEGIN PRIVATE KEY-----\n[REDACTED]\n-----END PRIVATE KEY-----\nafter\n"
 
 
 def test_unclosed_private_key_stops_swallowing_after_a_cap():
@@ -187,23 +142,6 @@ def test_unclosed_private_key_stops_swallowing_after_a_cap():
 ])
 def test_non_secrets_are_not_touched(line):
     assert compact_text(line + "\n") == line + "\n"
-
-
-def test_redaction_is_idempotent_for_every_new_format():
-    text = ('{"password": ["a"], "secret": {"k": "v"}}\nDB_PASSWORD=x1\n-----BEGIN PRIVATE KEY-----\nA\n-----END PRIVATE KEY-----\n'
-            'postgres://u:p@h/db\nAuthorization: Basic abcdefgh1234\n')
-    once = compact_text(text)
-    assert compact_text(once) == once
-
-
-def test_redact_secrets_function_matches_the_scanner_over_lines():
-    text = 'a\n-----BEGIN PRIVATE KEY-----\nX\n-----END PRIVATE KEY-----\n{"password": [\n"z"\n]}\nend'
-    scanner, out = SecretScanner("common"), []
-    for line in text.split("\n"):
-        r = scanner.redact_line(line)
-        if r is not None:
-            out.append(r)
-    assert redact_secrets(text) == "\n".join(out)
 
 
 # ======================================================== batch versus streaming
@@ -224,14 +162,14 @@ def small_cut_sets(n):
             yield from (list(c) for c in itertools.combinations(range(1, n), k))
 
 
-@pytest.mark.parametrize("aggressive", [False, True])
+@pytest.mark.parametrize("mode", ["off", "runs", "adjacent", "global"])
 @pytest.mark.parametrize("text", TRICKY)
-def test_every_split_matches_batch(text, aggressive):
-    batch = compact_text(text, aggressive=aggressive)
+def test_every_split_matches_batch(text, mode):
+    batch = compact_text(text, dedupe=mode)
     for cuts in small_cut_sets(len(text)):
         points = [0, *cuts, len(text)]
         chunks = [text[a:b] for a, b in zip(points, points[1:])]
-        assert "".join(compact_stream(chunks, aggressive=aggressive)) == batch, (text, cuts)
+        assert "".join(compact_stream(chunks, dedupe=mode)) == batch, (text, cuts)
 
 
 FRAGMENTS = [
@@ -253,12 +191,11 @@ def random_text(rng):
 def test_random_streams_equal_batch(seed):
     rng = random.Random(seed)
     text = random_text(rng)
-    for aggressive in (False, True):
-        for mode in ("off", "common", "strict"):
-            batch = compact_text(text, redaction_mode=mode, aggressive=aggressive)
-            sizes = [rng.randint(1, 11) for _ in range(rng.randint(1, 4))]
-            assert stream(text, sizes, redaction_mode=mode, aggressive=aggressive) == batch
-            assert stream(text, (1,), redaction_mode=mode, aggressive=aggressive) == batch
+    for mode in ("off", "runs", "adjacent", "global"):
+        batch = compact_text(text, dedupe=mode)
+        sizes = [rng.randint(1, 11) for _ in range(rng.randint(1, 4))]
+        assert stream(text, sizes, dedupe=mode) == batch
+        assert stream(text, (1,), dedupe=mode) == batch
 
 
 PROTECTED = ("ERROR db timeout", "foo();", "}", "pass", "echo hi", "- item", "| a | b |", "    return x + 1", "```", "key: value",
@@ -271,28 +208,17 @@ def test_random_properties_idempotent_protected_and_no_invention(seed):
     text = random_text(rng)
     norm_lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     for aggressive in (False, True):
-        once = keep(text, aggressive=aggressive)
-        out_lines = once.split("\n")
-        again = keep(once, aggressive=aggressive)
+        mode = "global" if aggressive else "adjacent"
+        once = keep(text, dedupe=mode)
+        out_lines = once.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        again = keep(once, dedupe=mode)
         if aggressive:  # decided over a 4-line lookahead window: a second pass may only remove more
-            assert set(again.split("\n")) <= set(out_lines) and len(again) <= len(once)
+            assert set(again.replace("\r\n", "\n").replace("\r", "\n").split("\n")) <= set(out_lines) and len(again) <= len(once)
         else:
             assert again == once  # conservative mode is idempotent
         assert all(line in set(norm_lines) for line in out_lines if line.strip())  # nothing is invented
         for marker in PROTECTED:  # lines that are never dropped keep their exact count
             assert out_lines.count(marker) == norm_lines.count(marker), (marker, aggressive)
-
-
-@pytest.mark.parametrize("seed", range(700, 800))
-def test_random_secrets_never_survive_in_any_context(seed):
-    rng = random.Random(seed)
-    value = "".join(rng.choice("abcdefXYZ0123456789") for _ in range(rng.randint(8, 20)))
-    templates = [f"password={value}", f'password = "{value}"', f'{{"secret": "{value}"}}', f"api_key: {value}",
-                 f"password: str = '{value}'", f'"api-key": "{value}"', f"DB_PASSWORD={value}", f'{{"password": ["{value}"]}}',
-                 f'{{\n  "secret": [\n    "{value}"\n  ]\n}}', f"postgres://u:{value}@h/d", f"Authorization: Basic {value}"]
-    for template in templates:
-        for chunk in (1, 3, 1000):
-            assert value not in stream(f"{template}\n", (chunk,)), (template, chunk)
 
 
 @pytest.mark.parametrize("seed", range(800, 860))
@@ -396,8 +322,8 @@ def test_error_handling_is_predictable():
         with pytest.raises(TypeError):
             RealtimeCompactor().feed(bad)  # type: ignore[arg-type]
     with pytest.raises(ValueError):
-        compact_text("x", redaction_mode="bogus")  # type: ignore[arg-type]
-    assert compact_text("") == "" and compact_text("\n\n\n") == ""
+        compact_text("x", dedupe="bogus")
+    assert compact_text("") == "" and compact_text("\n\n\n") == "\n\n\n"  # identity by default
     c = RealtimeCompactor()
     c.feed("a\n")
     assert c.finish() == "" and c.finish() == ""
@@ -444,7 +370,7 @@ def test_deeply_nested_json_line_does_not_raise_recursion_error():
 def _only_repeats_removed(text, aggressive):
     norm = text.replace("\r\n", "\n").replace("\r", "\n")
     source = [line for line in norm.split("\n") if line.strip()]
-    kept = [line for line in keep(text, aggressive=aggressive).split("\n") if line.strip()]
+    kept = [line for line in keep(text, dedupe="global" if aggressive else "adjacent").replace("\r\n", "\n").replace("\r", "\n").split("\n") if line.strip()]
     i = 0
     seen: set[str] = set()
     previous = None
@@ -467,27 +393,10 @@ def test_only_repeated_lines_are_ever_dropped_and_order_is_kept(seed):
         _only_repeats_removed(text, aggressive)
 
 
-def test_secrets_after_a_closing_secret_array_on_the_same_line_are_masked():
-    doc = '{\n  "password": [\n    "a"\n  ], "token_value": 1, "secret": "hunter2"\n}'
-    out = compact_text(doc)
-    assert "hunter2" not in out and json.loads(out)["secret"] == "[REDACTED]"
-
-
 # ======================================================== findings from the independent review
 def test_quoted_private_key_constants_in_source_do_not_swallow_code():
     src = 'H = "-----BEGIN PRIVATE KEY-----"\ndef f(): ...\nprint(2)\nF = "-----END PRIVATE KEY-----"\n'
     assert compact_text(src) == src
-
-
-def test_unclosed_private_key_stops_at_the_first_non_key_line():
-    out = compact_text("-----BEGIN PRIVATE KEY-----\nAAAA\nBBBB\nThis is prose after.\nmore text\n")
-    assert out == "-----BEGIN PRIVATE KEY-----\n[REDACTED]\nThis is prose after.\nmore text\n"
-
-
-def test_very_long_private_key_body_is_fully_masked():
-    body = ("QUJD" * 16 + "\n") * 800
-    out = compact_text("-----BEGIN PRIVATE KEY-----\n" + body + "-----END PRIVATE KEY-----\n")
-    assert "QUJD" not in out and out.count("\n") == 3
 
 
 @pytest.mark.parametrize("text", ["src/a.py\nsrc/a.py\n", "README.md\nREADME.md\n", "foo.bar\nfoo.bar\n", "all:\nall:\n",
@@ -499,36 +408,6 @@ def test_paths_labels_and_counts_are_never_deduplicated(text):
 def test_plain_text_without_a_timestamp_or_level_is_still_treated_as_prose():
     # Documented limit: "Connection refused" looks like a sentence, so adjacent repeats collapse.
     assert keep("Connection refused\nConnection refused\n", dedupe="adjacent") == "Connection refused\n"
-
-
-@pytest.mark.parametrize("text,expected", [
-    ("client_secret=abc&grant=1\n", "client_secret=[REDACTED]&grant=1\n"),
-    ("password=abc&user=bob\n", "password=[REDACTED]&user=bob\n"),
-    ("password: correct horse battery staple\n", "password: [REDACTED]\n"),
-    ("password = my pass phrase\n", "password = [REDACTED]\n"),
-    ("DB_PASSWORD=x npm test\n", "DB_PASSWORD=[REDACTED] npm test\n"),
-    ("api_key=abc user=bob\n", "api_key=[REDACTED] user=bob\n"),
-    ("password: {{ vault_pw }}\n", "password: {{ vault_pw }}\n"),
-    ("password: {% raw %}\n", "password: {% raw %}\n"),
-])
-def test_unquoted_value_extent_and_template_placeholders(text, expected):
-    assert compact_text(text) == expected
-    assert stream(text, (2,)) == expected
-
-
-def test_yaml_block_scalar_secret_is_masked_and_following_keys_survive():
-    doc = "secret: |\n  hunter2supersecret\n  second line\nother: 1\nnext:\n  nested: yes\n"
-    out = compact_text(doc)
-    assert out == "secret: |\n  [REDACTED]\n  [REDACTED]\nother: 1\nnext:\n  nested: yes\n"
-    assert "hunter2" not in stream(doc, (1,))
-
-
-def test_invalid_redaction_mode_is_rejected_everywhere():
-    from redaction import validate_mode
-    for call in (lambda: redact_secrets("password=abc", "bogus"), lambda: SecretScanner("bogus"), lambda: validate_mode("x"),
-                 lambda: compact_text("x", redaction_mode="bogus"), lambda: RealtimeCompactor(redaction_mode="bogus")):
-        with pytest.raises(ValueError):
-            call()
 
 
 def test_apostrophes_in_comments_do_not_leave_a_secret_block_open():

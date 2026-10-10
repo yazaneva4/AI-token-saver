@@ -218,7 +218,7 @@ def test_streaming_long_unique_lines_does_not_retain_them(mode):
     import tracemalloc
     from ai_token_saver import RealtimeCompactor
     rng = random.Random(1)
-    compactor = RealtimeCompactor(redact_secrets=False, dedupe=mode, _retain_original=False, _retain_output=False)
+    compactor = RealtimeCompactor(dedupe=mode, retain=False)
     tracemalloc.start()
     for i in range(100):  # 20 MB of unique 200 KB lines, streamed
         compactor.feed(f"w{i} " + rng.randbytes(100_000).hex() + "\n")
@@ -228,12 +228,13 @@ def test_streaming_long_unique_lines_does_not_retain_them(mode):
     assert retained < 5_000_000, f"{retained / 1e6:.1f} MB still referenced after the stream ended"
 
 
-def test_runs_mode_does_not_scan_a_huge_unrepeated_line_more_than_default_mode_does():
+def test_runs_mode_does_not_scan_a_huge_unrepeated_line_more_than_adjacent_mode_does():
+    # Round 4: the default is now an identity pass, so the cost baseline is the other line-based mode.
     import time
     from ai_token_saver import compact_text
     line = "x" * 5_000_000 + "\n"
     start = time.perf_counter()
-    compact_text(line, redact_secrets=False)
+    compact_text(line, dedupe="adjacent")
     base = time.perf_counter() - start
     start = time.perf_counter()
     compact_text(line, redact_secrets=False, dedupe="runs")
@@ -249,29 +250,12 @@ def test_global_mode_still_recognises_long_repeated_lines_by_content():
 
 
 # ---------------------------------------------------------------- review findings
-def test_compact_json_keeps_its_colons_when_values_are_masked():
-    import json as _json
-    from redaction import redact_secrets
-    for doc in ('{"secret": {"a":1,"b":true,"c":"s","d":[1,2,{"e":null}]}}', 'secret = {"a":1,"b":2}', '{"password":["x","y"],"n":1}',
-                '{"api_key":{"k1":123,"k2":"v"}}'):
-        out = redact_secrets(doc)
-        assert out.count(":") == doc.count(":"), (doc, out)
-        if doc.startswith("{"):
-            assert keys_in(_json.loads(out)) == keys_in(_json.loads(doc))
-    assert redact_secrets('{"secret": {"a":1,"b":true}}') == '{"secret": {"a":"[REDACTED]","b":true}}'
 
 
 def keys_in(value):
     if isinstance(value, dict):
         return [(k, keys_in(v)) for k, v in value.items()]
     return [keys_in(v) for v in value] if isinstance(value, list) else None
-
-
-def test_credentials_used_as_keys_inside_a_multiline_secret_block_are_masked():
-    from redaction import redact_secrets
-    doc = '{\n  "secret": {\n    "AKIAIOSFODNN7EXAMPLE": 1,\n    "ok": 2\n  },\n  "other": "ghp_' + "a1B2c3D4" * 5 + '"\n}'
-    out = redact_secrets(doc)
-    assert "AKIAIOSFODNN7EXAMPLE" not in out and "ghp_" not in out and '"other"' in out
 
 
 def test_persisted_fingerprints_from_before_the_dedupe_modes_are_not_reused():

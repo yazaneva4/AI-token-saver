@@ -11,34 +11,38 @@ import secrets
 import time
 from typing import Iterable, Iterator
 
-from ai_token_saver import CompactionResult, RedactionMode, RealtimeCompactor, _resolve_dedupe, check_state_path
+from ai_token_saver import CompactionResult, RealtimeCompactor, _resolve_dedupe, check_state_path
 
 
 @dataclass(frozen=True)
 class RealtimeUsageResult:
     fingerprint: str
-    result: CompactionResult
+    result: CompactionResult | None  # None when the saver was created with retain=False
     changed: bool
 
 
-def state_fingerprint(text: str, *, redaction_mode: RedactionMode = "common", aggressive: bool = False,
-                      dedupe: str | None = None) -> str:
+def _fingerprint_hasher(mode: str) -> "hashlib._Hash":
+    # v3 names the dedupe mode only (redaction is gone). Older fingerprints are deliberately not reused:
+    # the same input now compacts differently, so it counts as changed once.
+    return hashlib.sha256(f"v3\0{mode}\0".encode("utf-8"))
+
+
+def state_fingerprint(text: str, *, aggressive: bool = False, dedupe: str | None = None, **_legacy: object) -> str:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    mode = _resolve_dedupe(dedupe, aggressive)
-    # v2 names the dedupe mode. v1 fingerprints (written when the default dropped adjacent repeats) are
-    # deliberately not reused: the same input now compacts differently, so it counts as changed once.
-    payload = f"v2\0{redaction_mode}\0{mode}\0{text}".encode("utf-8", "surrogatepass")
-    return hashlib.sha256(payload).hexdigest()
+    hasher = _fingerprint_hasher(_resolve_dedupe(dedupe, aggressive))
+    hasher.update(text.encode("utf-8", "surrogatepass"))
+    return hasher.hexdigest()
+
 
 
 class RealtimeUsageSaver:
     """Incremental usage saver with durable cross-process idempotency."""
 
-    def __init__(self, *, redact_secrets: bool = True, redaction_mode: RedactionMode | None = None,
+    def __init__(self, *, redact_secrets: bool = True, redaction_mode: str | None = None,
                  aggressive: bool = False, last_fingerprint: str | None = None,
                  state_path: str | os.PathLike[str] | None = None, lock_timeout: float = 5.0,
-                 suppress_unchanged: bool = False, dedupe: str | None = None) -> None:
+                 suppress_unchanged: bool = False, dedupe: str | None = None, retain: bool = True) -> None:
         if lock_timeout <= 0:
             raise ValueError("lock_timeout must be positive")
         self.redact_secrets = redact_secrets
@@ -46,6 +50,8 @@ class RealtimeUsageSaver:
         self.dedupe = _resolve_dedupe(dedupe, aggressive)
         self.aggressive = self.dedupe == "global"
         self.suppress_unchanged = suppress_unchanged
+        self.retain = retain  # False: keep neither the input nor the output (constant memory, no CompactionResult)
+        self._hasher = None
         self.state_path = check_state_path(state_path)
         self.lock_timeout = float(lock_timeout)
         self.last_fingerprint = last_fingerprint if last_fingerprint is not None else self._load_fingerprint()
@@ -154,9 +160,8 @@ class RealtimeUsageSaver:
 
     def start(self) -> None:
         self._refresh_persisted_fingerprint()
-        self._compactor = RealtimeCompactor(redact_secrets=self.redact_secrets,
-                                            redaction_mode=self.redaction_mode,
-                                            dedupe=self.dedupe)
+        self._compactor = RealtimeCompactor(dedupe=self.dedupe, retain=self.retain)
+        self._hasher = _fingerprint_hasher(self.dedupe)
         self._finished = False
         self.last_result = None
         # Whether the input repeats the saved state is only known once all of it has
@@ -175,6 +180,7 @@ class RealtimeUsageSaver:
         if not isinstance(chunk, str):
             raise TypeError("chunk must be a string")
         assert self._compactor is not None
+        self._hasher.update(chunk.encode("utf-8", "surrogatepass"))  # incremental: the input itself is not kept
         emitted = self._compactor.feed(chunk)
         if self._hold_output:
             if emitted:
@@ -190,9 +196,7 @@ class RealtimeUsageSaver:
         assert self._compactor is not None
 
         # Fingerprint before the expensive final compaction/metrics pass.
-        original = self._compactor.original
-        mode = self._compactor.redaction_mode
-        fingerprint = state_fingerprint(original, redaction_mode=mode, dedupe=self.dedupe)
+        fingerprint = self._hasher.hexdigest()
         lock_state = self._acquire_lock()
         try:
             previous = self._load_fingerprint() if self.state_path else self.last_fingerprint
@@ -201,7 +205,7 @@ class RealtimeUsageSaver:
             held, self._held = "".join(self._held), []
             # Unchanged input: suppress everything that was held back.
             final_output = held + final_output if changed or not self._hold_output else ""
-            result = RealtimeUsageResult(fingerprint, self._compactor.result(), changed)
+            result = RealtimeUsageResult(fingerprint, self._compactor.result() if self.retain else None, changed)
             if changed:
                 self._persist_fingerprint(fingerprint)
                 self.last_fingerprint = fingerprint
@@ -228,6 +232,5 @@ class RealtimeUsageSaver:
         return self.last_result
 
     def is_same_input(self, text: str) -> bool:
-        mode = self.redaction_mode or ("common" if self.redact_secrets else "off")
         previous = self._refresh_persisted_fingerprint()
-        return state_fingerprint(text, redaction_mode=mode, dedupe=self.dedupe) == previous
+        return state_fingerprint(text, dedupe=self.dedupe) == previous

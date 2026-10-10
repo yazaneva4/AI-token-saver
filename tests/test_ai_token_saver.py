@@ -103,36 +103,6 @@ def test_malformed_memory_has_safe_defaults(tmp_path):
     assert memory.state == []
 
 
-def test_secret_redaction():
-    source = "api_key=SECRET123 password=hunter2 Bearer abcdefghijklmnop sk-abcdefghijklmnopqrstuvwxyz"
-    result = compact_text(source)
-    assert "SECRET123" not in result
-    assert "hunter2" not in result
-    assert "abcdefghijklmnop" not in result
-    assert "sk-abcdefghijklmnopqrstuvwxyz" not in result
-    assert "[REDACTED]" in result
-
-
-def test_redaction_modes():
-    source = "api_key=SECRET123 AIKey=AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
-    common = compact_text(source, redaction_mode="common")
-    strict = compact_text(source, redaction_mode="strict")
-    off = compact_text(source, redaction_mode="off")
-    assert "SECRET123" not in common
-    assert "AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456" in common
-    assert "AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456" not in strict
-    assert "SECRET123" in off
-
-
-def test_invalid_redaction_mode_is_rejected():
-    try:
-        compact_text("hello", redaction_mode="invalid")  # type: ignore[arg-type]
-    except ValueError as exc:
-        assert "redaction_mode" in str(exc)
-    else:
-        raise AssertionError("invalid redaction mode must be rejected")
-
-
 def test_compact_text_with_metrics_returns_all_fields():
     source = "same line\nsame line\nunique line\n"
     result = compact_text_with_metrics(source)
@@ -205,12 +175,12 @@ def test_compact_stream_is_incremental_and_matches_compaction():
 
 
 def test_realtime_handles_split_crlf_without_extra_blank_output():
-    output = "".join(compact_stream(["one\r", "\ntwo\r\n", "three"], redact_secrets=False))
-    assert output == "one\ntwo\nthree"
+    output = "".join(compact_stream(["one\r", "\ntwo\r\n", "three"], dedupe="runs"))
+    assert output == "one\r\ntwo\r\nthree"  # Round 4: line endings are preserved, a split CRLF stays one ending
 
 
 def test_realtime_rejects_feed_after_finish():
-    compactor = RealtimeCompactor(redact_secrets=False)
+    compactor = RealtimeCompactor(dedupe="runs")
     compactor.feed("done")
     assert compactor.finish() == "done"
     assert compactor.finish() == ""
@@ -233,14 +203,6 @@ def test_realtime_result_requires_finish():
         raise AssertionError("result() must require finish()")
     compactor.finish()
     assert compactor.result().compacted == "hello\n"
-
-
-def test_realtime_secret_redaction_across_chunks():
-    output = list(compact_stream(["api_key=SEC", "RET123\n", "Bearer ", "abcdefghijklmnop\n"]))
-    combined = "".join(output)
-    assert "SECRET123" not in combined
-    assert "abcdefghijklmnop" not in combined
-    assert "[REDACTED]" in combined
 
 
 def test_invalid_stream_chunk_type_is_rejected():

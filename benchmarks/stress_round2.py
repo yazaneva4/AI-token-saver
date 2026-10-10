@@ -55,7 +55,7 @@ def build(kind, size):
         text = json.dumps([{"id": i % 50, "ok": rng.random() < 0.7, "tags": ["a", "a"]} for i in range(size // 60 or 1)], indent=1)
     elif kind == "yaml":
         text = "".join(f"- name: item{i % 40}\n  tags: [a, a]\n  value: {i % 7}\n" for i in range(size // 50 or 1))
-    elif kind == "secrets":
+    elif kind == "credentials":
         text = "".join(f"DB_PASSWORD=hunter{i}\napi_key=abc{i}def\nnormal line {i}\n" for i in range(size // 50 or 1))
     else:
         raise ValueError(kind)
@@ -131,7 +131,7 @@ def special_input(kind, size):
         return "2026-10-10 12:00:00 ERROR upstream timeout\n" * 100_000
     if kind == "nested_json_line":
         return "[" * (size // 2) + "]" * (size // 2) + "\n"
-    if kind == "secret_block_unclosed":
+    if kind == "key_block_unclosed":
         return 'password = [\n' + '  "x",\n' * (size // 7)
     if kind == "pem_blocks":
         return ("-----BEGIN PRIVATE KEY-----\n" + "A" * 64 + "\n" * 1 + "-----END PRIVATE KEY-----\n") * (size // 150)
@@ -144,10 +144,10 @@ def special_input(kind, size):
 
 def cases(max_mb):
     out = []
-    for kind in ("repeated", "unique", "python", "javascript", "multilingual", "agent", "json", "yaml", "secrets"):
+    for kind in ("repeated", "unique", "python", "javascript", "multilingual", "agent", "json", "yaml", "credentials"):
         for size in SIZES:
             heavy = size >= 100 * MB
-            if size > max_mb * MB or (heavy and kind not in ("repeated", "unique", "python", "agent", "secrets")):
+            if size > max_mb * MB or (heavy and kind not in ("repeated", "unique", "python", "agent", "credentials")):
                 continue
             out.append({"id": f"batch/{kind}/{size // KB}KB", "kind": kind, "size": size, "mode": "batch"})
     for kind in ("repeated", "python", "agent", "unique"):
@@ -156,7 +156,7 @@ def cases(max_mb):
                 out.append({"id": f"stream/{kind}/{chunking}/{size // KB}KB", "kind": kind, "size": size, "mode": "stream", "chunking": chunking, "verify": size <= 10 * MB})
     for kind, size in (("empty", 0), ("newlines", MB), ("newlines", 10 * MB), ("crlf_lines", 10 * MB), ("lone_cr", 10 * MB), ("nul_bytes", 10 * MB),
                        ("single_line", 50 * MB), ("surrogates", MB), ("lines_100k_repeated", 0), ("lines_100k_events", 0), ("nested_json_line", MB),
-                       ("secret_block_unclosed", 5 * MB), ("pem_blocks", 10 * MB), ("malformed_json", 5 * MB), ("binary_like", MB)):
+                       ("key_block_unclosed", 5 * MB), ("pem_blocks", 10 * MB), ("malformed_json", 5 * MB), ("binary_like", MB)):
         if size <= max_mb * MB:
             out.append({"id": f"special/{kind}/{size // KB}KB", "kind": kind, "size": size, "mode": "special"})
     out.append({"id": "concurrent/threads/8x1MB", "kind": "agent", "size": MB, "mode": "threads"})

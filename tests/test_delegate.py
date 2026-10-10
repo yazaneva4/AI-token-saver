@@ -4,7 +4,7 @@ from delegate import delegate, main
 def fakes(log):
     def run(step, p):
         log.append((step.model, step.effort))
-        return "answer\n\n\nanswer"
+        return "answer\nanswer\n\n\nend"
     return {"claude": run}
 
 
@@ -20,13 +20,13 @@ def test_auto_default_reports_detail_and_prefer():
 def test_default_opus_runs_sonnet_and_compacts():
     log = []
     res = delegate("edit", "do it", main="opus", runners=fakes(log), env={}, dedupe="adjacent")
-    assert log == [("sonnet", "medium")] and res["result"] == "answer\n"
+    assert log == [("sonnet", "medium")] and res["result"] == "answer\n\n\nend"
 
 
-def test_default_delegate_keeps_repeated_lines_and_only_collapses_blank_runs():
+def test_default_delegate_returns_the_reply_unchanged():
     log = []
     res = delegate("edit", "do it", main="opus", runners=fakes(log), env={})
-    assert res["result"] == "answer\n\nanswer"
+    assert res["result"] == "answer\nanswer\n\n\nend"  # Round 4: no blank-line collapse, no dropped lines
 
 
 def test_solo_and_router_run_nothing():

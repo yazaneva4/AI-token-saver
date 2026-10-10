@@ -45,14 +45,6 @@ def test_common_python_code_hints_are_protected():
     assert deduplicate(code, aggressive=True) == code
 
 
-def test_bare_apikey_is_not_redacted_but_api_key_is():
-    text = "apikey=keep-this\napi_key=hide-this\napi-key=hide-this-too"
-    result = compact_text(text, redact_secrets=True)
-    assert "apikey=keep-this" in result
-    assert "api_key=[REDACTED]" in result
-    assert "api-key=[REDACTED]" in result
-
-
 def test_duplicate_json_objects_are_protected_in_aggressive_mode():
     json_lines = ['{"key": "value"}', '{"key": "value"}']
     assert deduplicate(json_lines, aggressive=True) == json_lines
@@ -61,13 +53,6 @@ def test_duplicate_json_objects_are_protected_in_aggressive_mode():
 def test_duplicate_json_arrays_are_protected_in_aggressive_mode():
     json_lines = ['["one", "two"]', '["one", "two"]']
     assert deduplicate(json_lines, aggressive=True) == json_lines
-
-
-def test_metrics_report_output_growth_after_redaction():
-    text = "secret=abc"
-    result = compact_text_with_metrics(text, redact_secrets=True, tokenizer=lambda value: len(value))
-    assert result.output_grew
-    assert result.token_change_percent < 0
 
 
 def test_metrics_report_real_savings_as_positive_change():

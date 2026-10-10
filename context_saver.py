@@ -109,7 +109,7 @@ class ContextSaver:
     claimed, giving each identical state a single winner across processes.
     """
     def __init__(self, *, last_fingerprint: str | None = None, state_path: str | os.PathLike[str] | None = None, lock_timeout: float = 5.0) -> None:
-        if lock_timeout <= 0:
+        if not lock_timeout > 0:
             raise ValueError("lock_timeout must be positive")
         self.state_path = check_state_path(state_path)
         self.lock_timeout = float(lock_timeout)

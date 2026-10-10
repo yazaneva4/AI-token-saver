@@ -43,13 +43,15 @@ class RealtimeUsageSaver:
                  aggressive: bool = False, last_fingerprint: str | None = None,
                  state_path: str | os.PathLike[str] | None = None, lock_timeout: float = 5.0,
                  suppress_unchanged: bool = False, dedupe: str | None = None, retain: bool = True) -> None:
-        if lock_timeout <= 0:
+        if not lock_timeout > 0:
             raise ValueError("lock_timeout must be positive")
         self.redact_secrets = redact_secrets
         self.redaction_mode = redaction_mode
         self.dedupe = _resolve_dedupe(dedupe, aggressive)
         self.aggressive = self.dedupe == "global"
         self.suppress_unchanged = suppress_unchanged
+        if not retain and suppress_unchanged:
+            raise ValueError("retain=False cannot be combined with suppress_unchanged=True (held output must be kept)")
         self.retain = retain  # False: keep neither the input nor the output (constant memory, no CompactionResult)
         self._hasher = None
         self.state_path = check_state_path(state_path)

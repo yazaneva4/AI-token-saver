@@ -366,6 +366,8 @@ class RealtimeCompactor:
 
     ``retain=False`` keeps neither the input nor the output (constant memory for streams); the
     ``original``/``compacted``/``result`` accessors then raise ``RuntimeError``.
+    ``dedupe="global"`` remembers one short entry (at most 64 characters or a 16-byte digest) per distinct line,
+    so it grows with the number of distinct lines even with ``retain=False``.
     ``redact_secrets`` and ``redaction_mode`` are accepted for backwards compatibility and ignored.
     """
 

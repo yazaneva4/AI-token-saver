@@ -277,3 +277,11 @@ def test_usage_saver_with_retain_false_holds_no_copy_of_the_stream():
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     assert peak < 6_000_000, f"peak {peak / 1e6:.1f} MB"
+
+
+def test_nan_lock_timeout_and_unbounded_hold_combination_are_rejected():
+    for bad in (float("nan"), 0, -1):
+        with pytest.raises(ValueError):
+            RealtimeUsageSaver(lock_timeout=bad)
+    with pytest.raises(ValueError):
+        RealtimeUsageSaver(retain=False, suppress_unchanged=True)

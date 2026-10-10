@@ -117,7 +117,7 @@ def state_fingerprint(state: Mapping[str, object] | UsageCheckpoint | str) -> st
         payload = _redact(state)
     else:
         raise TypeError("state must be a mapping, UsageCheckpoint, or string")
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8", "surrogatepass")
     return hashlib.sha256(encoded).hexdigest()
 
 

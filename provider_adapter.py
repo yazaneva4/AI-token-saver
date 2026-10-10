@@ -80,7 +80,7 @@ def _provider_state_path(provider: str) -> Path:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", normalized) or "provider"
     # Keep the readable slug, but add a digest so distinct provider names such
     # as ``foo/bar`` and ``foo_bar`` can never share persistent state.
-    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(normalized.encode("utf-8", "surrogatepass")).hexdigest()[:12]
     return root / f"{safe}-{digest}.json"
 
 

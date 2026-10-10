@@ -9,6 +9,8 @@ from pathlib import Path
 import re
 from typing import Callable, Iterable, Iterator, Literal, Mapping, Protocol
 
+from redaction import RedactionMode, SecretScanner, redact_secrets as _redact_secrets, validate_mode
+
 
 class Tokenizer(Protocol):
     def encode(self, text: str) -> object: ...
@@ -16,7 +18,6 @@ class Tokenizer(Protocol):
 
 TokenCounter = Callable[[str], int]
 TokenizerLike = Tokenizer | TokenCounter
-RedactionMode = Literal["off", "common", "strict"]
 
 
 @dataclass
@@ -60,28 +61,6 @@ class Memory:
                 )
         return cls(**values)
 
-
-# Key names whose values are treated as secrets. "apikey" (no separator) is
-# intentionally not matched; see tests/test_bug_hunter_regressions.py.
-_SECRET_KEY = r"(?:api[_-]key|access[_-]?token|auth[_-]?token|password|secret)"
-# key [: type annotation] (=|:) value.  The key may be quoted (JSON, YAML, dict
-# literals); the value is a complete quoted string or a bare token.  "==" is a
-# comparison, not an assignment, so it is never matched.
-_SECRET_ASSIGN = re.compile(
-    r"(?i)(?P<pre>(?P<q>[\"']?)\b" + _SECRET_KEY + r"\b(?P=q)"
-    r"(?:\s*:\s*[A-Za-z_][\w.\[\], |]*?)?\s*[:=](?!=)\s*)"
-    r"(?P<val>\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'|[^\s,;}\])]+)"
-)
-_SECRET_PATTERNS = (
-    _SECRET_ASSIGN,
-    re.compile(r"(?i)(\bBearer\s+)([A-Za-z0-9._~+/=-]{16,})"),
-    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
-    re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"),
-)
-_DOTTED_NAME = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+$")
-_CALL_ARGUMENTS = re.compile(r"[\w\])]\s*\([^()]*$")  # text ends inside "name(" ... unclosed
-_NUMERIC = re.compile(r"^[+-]?\d[\d_.eE+-]*$")
-_NON_SECRET_BARE = frozenset({"none", "null", "nil", "true", "false", "undefined"})
 
 _CODE_HINTS = (
     "```", "#!/", "import ", "from ", "def ", "class ", "function ",
@@ -135,74 +114,34 @@ def estimate_tokens(text: str, tokenizer: TokenizerLike | None = None) -> int:
     return _token_count_with(tokenizer, text)[0]
 
 
-def _is_reference(value: str) -> bool:
-    """True for values that read a secret instead of containing one.
-
-    Calls, subscripts, attribute access, environment references and literals such
-    as None are code or configuration, not secret material. Replacing them would
-    change what the code does, so they are left untouched.
-    """
-    return (
-        any(ch in value for ch in "()[]{}")
-        or value.startswith(("$", "%", "<"))
-        or bool(_DOTTED_NAME.match(value))
-        or value.lower() in _NON_SECRET_BARE
-    )
-
-
-def _redact_assignment(match: "re.Match[str]") -> str:
-    pre, value = match.group("pre"), match.group("val")
-    if value[0] in "\"'":
-        if len(value) <= 2:
-            return match.group(0)  # empty string: nothing to hide
-        return f"{pre}{value[0]}[REDACTED]{value[0]}"  # keep quotes: JSON/Python stay parseable
-    if _is_reference(value):
-        return match.group(0)
-    # Inside an unclosed "(" this is a keyword argument such as f(password=pw): the
-    # value is a variable reference, and a literal secret would have been quoted.
-    if _CALL_ARGUMENTS.search(match.string[: match.start()]):
-        return match.group(0)
-    if match.group("q"):
-        # JSON / dict literal: a bare value is a number (redact, as a string so the
-        # document stays valid) or a variable reference (keep).
-        return f'{pre}"[REDACTED]"' if _NUMERIC.match(value) else match.group(0)
-    return f"{pre}[REDACTED]"
-
-
-def _redact_secrets(text: str, mode: RedactionMode = "common") -> str:
-    """Redact credentials. This is separate from compaction and is NOT lossless."""
-    if mode == "off":
-        return text
-    result = _SECRET_PATTERNS[0].sub(_redact_assignment, text)
-    result = _SECRET_PATTERNS[1].sub(lambda m: m.group(1) + "[REDACTED]", result)
-    result = _SECRET_PATTERNS[2].sub("[REDACTED]", result)
-    if mode == "strict":
-        result = _SECRET_PATTERNS[3].sub("[REDACTED]", result)
-    return result
-
-
 def _validate_redaction_mode(mode: RedactionMode) -> None:
-    if mode not in {"off", "common", "strict"}:
-        raise ValueError("redaction_mode must be 'off', 'common', or 'strict'")
+    validate_mode(mode)
 
 
 def _line_key(line: str) -> str:
     return line.rstrip(" \t")
 
 
-def _looks_like_code_line(line: str) -> bool:
-    stripped = line.strip()
-    if not stripped:
-        return False
-    if _CODE_SYNTAX.match(stripped) or _CODE_HINT_RE.search(stripped):
+def _code_syntax_or_json(stripped: str) -> bool:
+    """Code by structure (statement syntax or a JSON object/array), not by hint words."""
+    if _CODE_SYNTAX.match(stripped):
         return True
     if _JSON_OBJECT.match(stripped) or _JSON_ARRAY.match(stripped):
         try:
             parsed = json.loads(stripped)
+        except RecursionError:
+            return True  # nested too deeply to parse, but it is bracketed JSON-like structure
         except (json.JSONDecodeError, TypeError):
             return False
         return isinstance(parsed, (dict, list))
     return False
+
+
+def _looks_like_code_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    return bool(_CODE_HINT_RE.search(stripped)) or _code_syntax_or_json(stripped)
 
 
 def _looks_like_technical_content(lines: list[str]) -> bool:
@@ -214,27 +153,50 @@ def _looks_like_technical_content(lines: list[str]) -> bool:
 
 
 _NEWLINE = re.compile(r"\r\n|\r|\n")
-# Record lines: log/event entries (a leading timestamp, or an upper-case level
-# token), list items (YAML sequences, Markdown/numbered lists) and ``key: value``
-# entries. Identical consecutive records are separate data points (their repeat
-# count matters), so they are never removed. The level match is upper-case only so
-# ordinary prose such as "error" is unaffected.
+# Record lines carry data whose repeat count matters, so identical consecutive copies are
+# never removed: log/event entries (a timestamp or clock time anywhere in the line, an
+# upper-case level token, glog/pytest markers), list items (YAML sequences, Markdown and
+# numbered lists), ``key: value`` entries and ``key=value`` pairs (logfmt, .env).
 _EVENT_RECORD = re.compile(
-    r"^\s*\[?\d{4}-\d{2}-\d{2}|^\s*\[?\d{1,2}:\d{2}:\d{2}"
-    r"|\b(?:TRACE|DEBUG|INFO|NOTICE|WARN|WARNING|ERROR|FATAL|CRITICAL)\b"
-    r"|^\s*(?:[-*+]|\d+[.)])\s+\S"
-    r"|^\s*[A-Za-z_][\w.-]*:\s"
+    r"\d{4}[-/]\d{2}[-/]\d{2}|\b\d{1,2}:\d{2}:\d{2}|\b\d{1,2}/[A-Z][a-z]{2}/\d{4}"
+    r"|^\s*[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:|^\s*\d{9,13}\b|^\s*[IWEF]\d{4}\s"
+    r"|\b(?:TRACE|DEBUG|INFO|NOTICE|WARN|WARNING|ERROR|FATAL|CRITICAL|FAILED|PASSED|SKIPPED|XFAIL)\b"
+    r"|^\s*(?:[-*+]|\d+[.)])\s+\S|^\s*[A-Za-z_][\w.-]*:(?:\s|$)|^\s*[A-Za-z_][\w.-]*=\S"
 )
+# Only lines that read as plain prose may ever be dropped as duplicates. Code, markup and
+# structured data are never removed, even before any later line shows the input is code.
+_CODE_PUNCTUATION = re.compile(r"[{}\[\]()<>=;\\|$@^~`]|\+\+|--|->|::")
+# Counts, ids, paths, file names and labels carry data, so they are never treated as prose either.
+_NON_PROSE = re.compile(r"\d|\w[./\\]\w|:\s*$")
+_COMMAND_WORDS = frozenset(
+    "echo cd ls cat git make npm npx pip pip3 pytest python python3 node go cargo docker kubectl curl wget rm cp mv mkdir touch "
+    "export source sudo apt apt-get brew yarn pnpm gcc clang tar chmod chown ssh scp grep sed awk find tail head sleep kill".split()
+)
+_BARE_KEYWORDS = frozenset("pass break continue end fi done esac else then do begin return null none nil true false try finally default".split())
 
 
-def _is_event_record(line: str) -> bool:
-    return bool(_EVENT_RECORD.search(line))
+@lru_cache(maxsize=8192)
+def _is_dedupable_prose(line: str) -> bool:
+    """True when ``line`` is plain prose that may be dropped as a repeat."""
+    if not line or line[0].isspace() or line[0] in "#>|-*+=~_\"'" or line.endswith(","):
+        return False
+    if _CODE_PUNCTUATION.search(line) or _NON_PROSE.search(line) or _EVENT_RECORD.search(line):
+        return False
+    words = line.split()
+    if words[0] in _COMMAND_WORDS or (len(words) == 1 and words[0] in _BARE_KEYWORDS):
+        return False
+    return any(ch.isalpha() for ch in line)
 
 
 @lru_cache(maxsize=8192)
 def _is_technical_line(line: str) -> bool:
-    """Cached per-line technical test: repeated lines (the case compaction targets) are classified once."""
-    return _looks_like_technical_content([line])
+    """Cached per-line technical test: repeated lines (the case compaction targets) are classified once.
+
+    Equivalent to ``_looks_like_technical_content([line])`` with one hint scan instead of two."""
+    if _CODE_HINT_RE.search(line):
+        return True
+    stripped = line.strip()
+    return bool(stripped) and _code_syntax_or_json(stripped)
 
 
 def deduplicate(lines: Iterable[str], *, aggressive: bool = False) -> list[str]:
@@ -281,7 +243,7 @@ def _deduplicate_memory_facts(lines: Iterable[str]) -> list[str]:
 def _compact_lines(text: str, *, redact_mode: RedactionMode, aggressive: bool = False) -> str:
     """Batch compaction. Runs the streaming engine over the whole text so that batch
     and streaming output are identical by construction."""
-    compactor = RealtimeCompactor(redaction_mode=redact_mode, aggressive=aggressive, _retain_original=False)
+    compactor = RealtimeCompactor(redaction_mode=redact_mode, aggressive=aggressive, _retain_original=False, _retain_output=False)
     return compactor.feed(text) + compactor.finish()
 
 
@@ -309,6 +271,7 @@ class RealtimeCompactor:
         tokenizer: TokenizerLike | None = None,
         aggressive: bool = False,
         _retain_original: bool = True,
+        _retain_output: bool = True,
     ):
         if redaction_mode is None:
             redaction_mode = "common" if redact_secrets else "off"
@@ -317,6 +280,9 @@ class RealtimeCompactor:
         self.tokenizer = tokenizer
         self.aggressive = aggressive
         self._retain_original = _retain_original
+        self._retain_output = _retain_output
+        self._emitted = False  # something has been output already (decides leading blank lines)
+        self._scanner = SecretScanner(redaction_mode)
         self._tail: list[str] = []  # unterminated final line, kept as parts (O(n) for 1-char chunks)
         self._seen: set[str] = set()
         self._previous_key: str | None = None
@@ -328,44 +294,61 @@ class RealtimeCompactor:
         self._blank_newlines: list[str] = []
         self.finished = False
 
+    def _emit(self, line: str, newline: str, output: list[str]) -> None:
+        """Decide one line (blank, duplicate or kept) and append what is emitted to ``output``."""
+        if not line.strip():
+            self._blank_newlines.append(newline or "\n")
+            return
+        key = _line_key(line)
+        duplicate = not self._technical and (
+            key in self._seen if self.aggressive else key == self._previous_key
+        ) and _is_dedupable_prose(line)
+        self._previous_key = key
+        if duplicate:
+            return
+        self._seen.add(key)
+        if self._blank_newlines:
+            if self._technical:
+                output.extend(self._blank_newlines)  # code: blank lines are preserved exactly
+            elif self._emitted or output:
+                output.append("\n")  # prose: one blank line keeps the paragraph boundary
+            self._blank_newlines = []
+        output.append(line + newline)
+
+    def _store(self, output: list[str]) -> str:
+        value = "".join(output)
+        if value:
+            self._emitted = True
+            if self._retain_output:
+                self._output_parts.append(value)
+        return value
+
     def _flush_pending(self, *, force: bool = False) -> str:
+        """Aggressive mode only: decide lines in groups so code just ahead of a repeat protects it."""
         if not self._pending_lines:
             return ""
         if self._pending_technical:
             self._technical = True
         if self.aggressive and not self._technical and not force and len(self._pending_lines) < self._LOOKAHEAD_LINES:
             return ""
-
         pending = self._pending_lines
         self._pending_lines = []
         self._pending_technical = False
         output: list[str] = []
         for line, newline in pending:
-            if not line.strip():
-                self._blank_newlines.append(newline or "\n")
-                continue
-            key = _line_key(line)
-            duplicate = False if self._technical or _is_event_record(line) else (
-                key in self._seen if self.aggressive else key == self._previous_key
-            )
-            self._previous_key = key
-            if duplicate:
-                continue
-            self._seen.add(key)
-            if self._blank_newlines:
-                if self._technical:
-                    output.extend(self._blank_newlines)  # code: blank lines are preserved exactly
-                elif self._output_parts or output:
-                    output.append("\n")  # prose: one blank line keeps the paragraph boundary
-                self._blank_newlines = []
-            output.append(line + newline)
-        value = "".join(output)
-        if value:
-            self._output_parts.append(value)
-        return value
+            self._emit(line, newline, output)
+        return self._store(output)
 
     def _process_line(self, raw_line: str, newline: str) -> str:
-        line = _redact_secrets(raw_line, self.redaction_mode)
+        line = self._scanner.redact_line(raw_line)
+        if line is None:  # body of a private key: dropped
+            return ""
+        if not self.aggressive:  # conservative mode decides each line at once
+            if not self._technical and line.strip() and _is_technical_line(line):
+                self._technical = True
+            output: list[str] = []
+            self._emit(line, newline, output)
+            return self._store(output)
         self._pending_lines.append((line, newline))
         if not (self._technical or self._pending_technical) and line.strip():
             self._pending_technical = _is_technical_line(line)
@@ -415,7 +398,8 @@ class RealtimeCompactor:
         # Trailing blank lines: kept for code (exact), dropped for prose.
         if self._technical and self._blank_newlines:
             tail = "".join(self._blank_newlines)
-            self._output_parts.append(tail)
+            if self._retain_output:
+                self._output_parts.append(tail)
             output.append(tail)
         self._blank_newlines = []
         return "".join(output)

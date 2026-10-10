@@ -79,7 +79,7 @@ class ContextSnapshot:
 
     def fingerprint(self) -> str:
         payload = json.dumps(self.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        return hashlib.sha256(payload.encode("utf-8", "surrogatepass")).hexdigest()
 
     def to_text(self) -> str:
         sections: list[str] = []

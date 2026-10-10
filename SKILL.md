@@ -74,9 +74,12 @@ keeping every fact needed to act correctly.
 - State security warnings and confirmation requests in full, clear sentences.
   Use plain, complete wording for content persisted outside chat, including
   code comments, docs, commits, memory, and messages.
-- Compaction never removes log/event records, list items, `key: value` lines, code,
-  or JSON, and keeps one blank line between paragraphs. Redaction is lossy and is
-  never described as lossless compression.
+- Only plain prose lines may be dropped as duplicates. Compaction never removes code,
+  JSON/YAML, Markdown structure, list items, `key: value` lines, shell commands, or
+  log/event records, and keeps one blank line between paragraphs. Redaction is lossy
+  and is never described as lossless compression.
+- Report measured savings only. Realistic code, logs and transcripts usually save
+  well under 1%; a figure near 99% describes pure repetition and nothing else.
 - Do not imitate caveman grammar or use invented abbreviations. Save words,
   never meaning. If a caveman-style or other telegraphic-speech skill is also
   active, this skill takes precedence: write in plain grammatical language, and

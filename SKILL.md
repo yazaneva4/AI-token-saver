@@ -76,8 +76,9 @@ keeping every fact needed to act correctly.
   code comments, docs, commits, memory, and messages.
 - Repeated lines are kept unless the user opts in. Even in the opt-in modes only plain prose lines are touched; compaction never removes code,
   JSON/YAML, Markdown structure, list items, `key: value` lines, shell commands, or
-  log/event records, and keeps one blank line between paragraphs. Redaction is lossy
-  and is never described as lossless compression.
+  log/event records. The default returns the text unchanged, credentials and
+  configuration values are never masked or rewritten, and only `dedupe="runs"` is
+  described as lossless (it is exactly reversible with `expand_runs`).
 - Report measured savings only. Realistic code, logs and transcripts usually save
   well under 1%; a figure near 99% describes pure repetition and nothing else.
 - Do not imitate caveman grammar or use invented abbreviations. Save words,

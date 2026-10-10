@@ -13,7 +13,7 @@ import statistics
 import time
 from typing import Callable, Iterable
 
-from ai_token_saver import Memory, RealtimeCompactor, compact_stream, compact_text, compact_text_with_metrics, estimate_tokens, merge_memory
+from ai_token_saver import Memory, RealtimeCompactor, compact_stream, compact_text, compact_text_with_metrics, estimate_tokens, expand_runs, merge_memory
 
 
 @dataclass
@@ -50,7 +50,7 @@ def _measure(name: str, text: str, fn: Callable[[str], str], repeats: int = 3) -
 
 def _stream_compact(text: str, chunk_size: int) -> str:
     chunks = (text[i : i + chunk_size] for i in range(0, len(text), chunk_size))
-    return "".join(compact_stream(chunks, redact_secrets=False, dedupe="adjacent"))
+    return "".join(compact_stream(chunks, dedupe="adjacent"))
 
 
 def run_benchmarks(*, deep: bool = False) -> list[BenchmarkResult]:
@@ -61,9 +61,9 @@ def run_benchmarks(*, deep: bool = False) -> list[BenchmarkResult]:
         prose = ("The same project context appears here repeatedly.\n" * ((size // 50) + 1))[:size]
         label = f"large-context-{size // 1_000_000 or 0}mb"
         # Best case: pure repetition. Only the first two rows keep every occurrence's information.
-        results.append(_measure(f"{label}-default", prose, lambda value: compact_text(value, redact_secrets=False)))
-        results.append(_measure(f"{label}-runs-lossless", prose, lambda value: compact_text(value, redact_secrets=False, dedupe="runs")))
-        results.append(_measure(f"{label}-adjacent-LOSSY", prose, lambda value: compact_text(value, redact_secrets=False, dedupe="adjacent")))
+        results.append(_measure(f"{label}-default", prose, lambda value: compact_text(value)))
+        results.append(_measure(f"{label}-runs-lossless", prose, lambda value: compact_text(value, dedupe="runs")))
+        results.append(_measure(f"{label}-adjacent-LOSSY", prose, lambda value: compact_text(value, dedupe="adjacent")))
 
     stream_text = ("hello world\n" * (50_000 if deep else 5_000))
     for chunk_size in (1, 10, 127):
@@ -82,7 +82,7 @@ def run_benchmarks(*, deep: bool = False) -> list[BenchmarkResult]:
         ))
 
     code = "def build(value):\n    return value * 2\n\n" * 2
-    code_result = compact_text_with_metrics(code, redact_secrets=False)
+    code_result = compact_text_with_metrics(code)
     results.append(BenchmarkResult(
         name="code-preservation",
         elapsed_ms=0.0,
@@ -94,21 +94,34 @@ def run_benchmarks(*, deep: bool = False) -> list[BenchmarkResult]:
         passed=code_result.compacted == code,
     ))
 
-    secret_text = "api_key=fake-test-key-12345678901234567890\nBearer fakeBearerToken1234567890\nAIza123456789012345678901234"
-    strict = compact_text_with_metrics(secret_text, redaction_mode="strict")
+    credential_text = "api_key=fake-test-key-12345678901234567890\nBearer fakeBearerToken1234567890\nAIza123456789012345678901234"
+    kept = compact_text_with_metrics(credential_text)
     results.append(BenchmarkResult(
-        name="secret-redaction",
+        name="credentials-preserved",
         elapsed_ms=0.0,
-        input_chars=len(secret_text),
-        output_chars=len(strict.compacted),
-        input_tokens=strict.in_tokens,
-        output_tokens=strict.out_tokens,
-        reduction_percent=strict.token_change_percent,
-        passed="fake-test-key" not in strict.compacted and "fakeBearerToken" not in strict.compacted and "AIza123" not in strict.compacted,
+        input_chars=len(credential_text),
+        output_chars=len(kept.compacted),
+        input_tokens=kept.in_tokens,
+        output_tokens=kept.out_tokens,
+        reduction_percent=kept.token_change_percent,
+        passed=kept.compacted == credential_text,
+    ))
+
+    round_trip_text = ("retrying request\n" * 40 + "[previous line repeated 3 more times]\nok\n") * 20
+    packed = compact_text(round_trip_text, dedupe="runs")
+    results.append(BenchmarkResult(
+        name="runs-round-trip",
+        elapsed_ms=0.0,
+        input_chars=len(round_trip_text),
+        output_chars=len(packed),
+        input_tokens=estimate_tokens(round_trip_text),
+        output_tokens=estimate_tokens(packed),
+        reduction_percent=(1.0 - len(packed) / len(round_trip_text)) * 100.0,
+        passed=expand_runs(packed) == round_trip_text and len(packed) < len(round_trip_text),
     ))
 
     tokenizer = lambda value: len(value.split())
-    measured = compact_text_with_metrics("one two two two three", tokenizer=tokenizer, redact_secrets=False)
+    measured = compact_text_with_metrics("one two two two three", tokenizer=tokenizer)
     results.append(BenchmarkResult(
         name="token-accuracy-with-supplied-counter",
         elapsed_ms=0.0,

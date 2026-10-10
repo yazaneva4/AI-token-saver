@@ -1,4 +1,7 @@
-"""AI Token Saver: conservative, dependency-free context compaction and memory."""
+"""AI Token Saver: conservative, dependency-free context compaction and memory.
+
+Input is never rewritten on the basis of what it looks like (credentials and configuration values pass
+through untouched); the only thing that changes text is the opt-in ``dedupe`` modes."""
 
 from __future__ import annotations
 
@@ -13,8 +16,6 @@ import re
 import secrets
 import shutil
 from typing import Callable, Iterable, Iterator, Literal, Mapping, Protocol
-
-from redaction import RedactionMode, SecretScanner, redact_secrets as _redact_secrets, validate_mode
 
 
 class Tokenizer(Protocol):
@@ -136,8 +137,9 @@ def check_state_path(path: str | os.PathLike[str] | None) -> Path | None:
     return resolved
 
 
-def _validate_redaction_mode(mode: RedactionMode) -> None:
-    validate_mode(mode)
+def _check_tokenizer(tokenizer: TokenizerLike | None) -> None:
+    if tokenizer is not None and not (callable(tokenizer) or hasattr(tokenizer, "encode")):
+        raise TypeError("tokenizer must be a callable or have an encode(text) method")
 
 
 def _line_key(line: str) -> str:
@@ -197,7 +199,7 @@ _EVENT_RECORD = re.compile(
 # structured data are never removed, even before any later line shows the input is code.
 _CODE_PUNCTUATION = re.compile(r"[{}\[\]()<>=;\\|$@^~`]|\+\+|--|->|::")
 # Counts, ids, paths, file names and labels carry data, so they are never treated as prose either.
-_NON_PROSE = re.compile(r"\d|\w[./\\]\w|:\s*$")
+_NON_PROSE = re.compile(r"\d|\w[./\\]\w|:\s*$|\S,\S|\t")
 _COMMAND_WORDS = frozenset(
     "echo cd ls cat git make npm npx pip pip3 pytest python python3 node go cargo docker kubectl curl wget rm cp mv mkdir touch "
     "export source sudo apt apt-get brew yarn pnpm gcc clang tar chmod chown ssh scp grep sed awk find tail head sleep kill".split()
@@ -283,16 +285,18 @@ def _deduplicate_memory_facts(lines: Iterable[str]) -> list[str]:
     return result
 
 
-def _compact_lines(text: str, *, redact_mode: RedactionMode, aggressive: bool = False, dedupe: str | None = None) -> str:
+def _compact_lines(text: str, *, aggressive: bool = False, dedupe: str | None = None) -> str:
     """Batch compaction. Runs the streaming engine over the whole text so that batch
     and streaming output are identical by construction."""
-    compactor = RealtimeCompactor(redaction_mode=redact_mode, aggressive=aggressive, dedupe=dedupe, _retain_original=False, _retain_output=False)
+    compactor = RealtimeCompactor(aggressive=aggressive, dedupe=dedupe, retain=False)
     return compactor.feed(text) + compactor.finish()
 
 
 DEDUPE_MODES = ("off", "runs", "adjacent", "global")
 _RUN_MARKER = "[previous line repeated {n} more times]"
 _RUN_MARKER_WIDTH = len(_RUN_MARKER.format(n=10 ** 7))  # worst case, so collapsing never makes text longer
+_MARKER_LOOKALIKE = re.compile(r"\\*\[previous line repeated \d+ more times\]\Z")
+_MARKER_LINE = re.compile(r"\[previous line repeated (\d+) more times\]\Z")
 
 
 def _resolve_dedupe(dedupe: str | None, aggressive: bool) -> str:
@@ -304,23 +308,67 @@ def _resolve_dedupe(dedupe: str | None, aggressive: bool) -> str:
     return mode
 
 
+def expand_runs(text: str, *, max_chars: int | None = None) -> str:
+    """Exact inverse of ``compact_text(x, dedupe="runs")``: ``expand_runs(compact_text(x, dedupe="runs")) == x``
+    for every string ``x``.
+
+    A marker line stands for N more copies of the line before it, with the same line ending. Original lines
+    that merely look like a marker (optionally already prefixed with backslashes) were given one extra
+    leading backslash by the compactor; it is removed here. ``max_chars`` bounds the result so a hostile
+    marker count cannot exhaust memory (``ValueError`` when exceeded)."""
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    out: list[str] = []
+    size = 0
+    previous: str | None = None
+    position = 0
+
+    def add(body: str, term: str) -> None:
+        nonlocal previous
+        marker = _MARKER_LINE.match(body) if previous is not None and body.startswith("[") else None
+        if marker is not None:
+            count = int(marker.group(1))
+            size_after = size + (len(previous) + len(term)) * count
+            if max_chars is not None and size_after > max_chars:
+                raise ValueError("expanded text exceeds max_chars")
+            out.append((previous + term) * count)
+            previous = None  # only the compactor writes markers, and never two in a row
+            return size_after
+        if body.startswith("\\") and _MARKER_LOOKALIKE.match(body):
+            body = body[1:]
+        out.append(body + term)
+        previous = body
+        return size + len(body) + len(term)
+
+    for match in _NEWLINE.finditer(text):
+        size = add(text[position:match.start()], match.group())
+        position = match.end()
+    if position < len(text):
+        size = add(text[position:], "")
+    if max_chars is not None and size > max_chars:
+        raise ValueError("expanded text exceeds max_chars")
+    return "".join(out)
+
+
 class RealtimeCompactor:
     """Line-oriented compaction that gives identical output for any chunking.
 
-    Repeated lines are meaningful (events, instructions, messages), so by default none is removed.
-    ``dedupe`` selects what happens to *prose* lines that repeat (code, markup, structured data and
-    log/event records are never touched in any mode):
+    Nothing is rewritten by default: ``dedupe="off"`` returns the input unchanged (every character,
+    blank line, indentation and line ending). ``dedupe`` selects what happens to *prose* lines that
+    repeat (code, markup, structured data and log/event records are never touched in any mode):
 
-    * ``"off"`` (default): nothing is removed. Only blank-line runs collapse to one paragraph break
-      and line endings become ``"\\n"``. Information-preserving.
+    * ``"off"`` (default): identity. Information-preserving.
     * ``"runs"``: a long run of identical consecutive lines becomes the line plus a count marker
-      (``[previous line repeated N more times]``). The count is kept, so it is information-preserving,
-      and it is applied only when it makes the text shorter.
+      (``[previous line repeated N more times]``). Exactly reversible with ``expand_runs`` and applied only
+      when it makes the text shorter.
     * ``"adjacent"``: LOSSY. Drops a line identical to the previous one.
     * ``"global"``: LOSSY. Drops any line seen before (``aggressive=True`` is the same mode).
 
-    Secret redaction replaces credentials with ``[REDACTED]``; it is lossy by design and is never
-    counted as lossless.
+    ``retain=False`` keeps neither the input nor the output (constant memory for streams); the
+    ``original``/``compacted``/``result`` accessors then raise ``RuntimeError``.
+    ``dedupe="global"`` remembers one short entry (at most 64 characters or a 16-byte digest) per distinct line,
+    so it grows with the number of distinct lines even with ``retain=False``.
+    ``redact_secrets`` and ``redaction_mode`` are accepted for backwards compatibility and ignored.
     """
 
     _LOOKAHEAD_LINES = 4
@@ -329,38 +377,30 @@ class RealtimeCompactor:
         self,
         *,
         redact_secrets: bool = True,
-        redaction_mode: RedactionMode | None = None,
+        redaction_mode: str | None = None,
         tokenizer: TokenizerLike | None = None,
         aggressive: bool = False,
         dedupe: str | None = None,
-        _retain_original: bool = True,
-        _retain_output: bool = True,
+        retain: bool = True,
     ):
-        if redaction_mode is None:
-            redaction_mode = "common" if redact_secrets else "off"
-        _validate_redaction_mode(redaction_mode)
-        self.redaction_mode = redaction_mode
+        _check_tokenizer(tokenizer)
         self.tokenizer = tokenizer
         self.dedupe = _resolve_dedupe(dedupe, aggressive)
         self.aggressive = self.dedupe == "global"
-        self._run_key: str | None = None  # dedupe="runs": the key of the run being counted
+        self._run_key: tuple[str, str] | None = None  # dedupe="runs": the (line, ending) of the run being counted
         self._run_count = 0
         self._run_need = 0
         self._run_held: list[tuple[str, str]] = []
         self._run_newline = ""
-        self._retain_original = _retain_original
-        self._retain_output = _retain_output
-        self._emitted = False  # something has been output already (decides leading blank lines)
-        self._scanner = SecretScanner(redaction_mode)
+        self._retain = retain
         self._tail: list[str] = []  # unterminated final line, kept as parts (O(n) for 1-char chunks)
         self._seen: set[str | bytes] = set()
-        self._previous_key: str | None = None
+        self._previous_key: object = None
         self._technical = False
         self._original_parts: list[str] = []
         self._output_parts: list[str] = []
         self._pending_lines: list[tuple[str, str]] = []
         self._pending_technical = False
-        self._blank_newlines: list[str] = []
         self.finished = False
 
     def _end_run(self, output: list[str]) -> None:
@@ -378,16 +418,14 @@ class RealtimeCompactor:
         """Decide one line (blank, duplicate or kept) and append what is emitted to ``output``."""
         if not line.strip():
             self._end_run(output)
-            if self.dedupe == "runs":
-                self._previous_key = None  # identical lines separated by a blank line are not one run
-            self._blank_newlines.append(newline or "\n")
+            self._previous_key = None  # identical lines separated by a blank line are not repeats
+            output.append(line + newline)
             return
-        key = _line_key(line)
         if self.dedupe == "runs":
+            key = (line, newline)  # exact: the same text with the same ending, so expand_runs restores it
             if self._run_key is not None:
                 if key == self._run_key:  # the run continues (it only starts for eligible prose)
                     self._run_count += 1
-                    self._run_newline = newline
                     if self._run_count < self._run_need:
                         self._run_held.append((line, newline))
                     else:
@@ -400,36 +438,28 @@ class RealtimeCompactor:
                 self._run_newline = newline
                 self._run_need = max(3, 2 + (_RUN_MARKER_WIDTH + 1) // (len(line) + 1))
                 return
-            duplicate = False
-        elif self.dedupe == "off":
-            duplicate = False
-        else:  # "adjacent" / "global": lossy removal of repeated prose
-            duplicate = not self._technical and (
-                _seen_entry(key) in self._seen if self.aggressive else key == self._previous_key
-            ) and _is_dedupable_prose(line)
+            self._previous_key = key
+            output.append(line + newline)
+            return
+        key = _line_key(line)
+        duplicate = self.dedupe != "off" and not self._technical and (
+            _seen_entry(key) in self._seen if self.aggressive else key == self._previous_key
+        ) and _is_dedupable_prose(line)
         self._previous_key = key
         if duplicate:
             return
         if self.aggressive:  # only the global mode reads this set, so no other mode may grow it
             self._seen.add(_seen_entry(key))
-        if self._blank_newlines:
-            if self._technical:
-                output.extend(self._blank_newlines)  # code: blank lines are preserved exactly
-            elif self._emitted or output:
-                output.append("\n")  # prose: one blank line keeps the paragraph boundary
-            self._blank_newlines = []
         output.append(line + newline)
 
     def _store(self, output: list[str]) -> str:
         value = "".join(output)
-        if value:
-            self._emitted = True
-            if self._retain_output:
-                self._output_parts.append(value)
+        if value and self._retain:
+            self._output_parts.append(value)
         return value
 
     def _flush_pending(self, *, force: bool = False) -> str:
-        """Aggressive mode only: decide lines in groups so code just ahead of a repeat protects it."""
+        """Global mode only: decide lines in groups so code just ahead of a repeat protects it."""
         if not self._pending_lines:
             return ""
         if self._pending_technical:
@@ -444,10 +474,9 @@ class RealtimeCompactor:
             self._emit(line, newline, output)
         return self._store(output)
 
-    def _process_line(self, raw_line: str, newline: str) -> str:
-        line = self._scanner.redact_line(raw_line)
-        if line is None:  # body of a private key: dropped
-            return ""
+    def _process_line(self, line: str, newline: str) -> str:
+        if self.dedupe == "runs" and "[previous line repeated" in line and _MARKER_LOOKALIKE.match(line):
+            line = "\\" + line  # a real line that looks like a marker is escaped so expand_runs can tell them apart
         if not self.aggressive:  # conservative mode decides each line at once
             if not self._technical and line.strip() and _is_technical_line(line):
                 self._technical = True
@@ -466,7 +495,7 @@ class RealtimeCompactor:
         output: list[str] = []
         position = 0
         for match in _NEWLINE.finditer(text, 0, limit):
-            output.append(self._process_line(text[position:match.start()], "\n"))
+            output.append(self._process_line(text[position:match.start()], match.group()))
             position = match.end()
         rest = text[position:]
         if final:
@@ -483,8 +512,12 @@ class RealtimeCompactor:
             raise TypeError("chunk must be a string")
         if not chunk:
             return ""
-        if self._retain_original:
+        if self._retain:
             self._original_parts.append(chunk)
+        if self.dedupe == "off":  # identity: no line state is needed at all
+            if self._retain:
+                self._output_parts.append(chunk)
+            return chunk
         if "\n" not in chunk and "\r" not in chunk:
             self._tail.append(chunk)  # no line end yet: just extend the partial line
             return ""
@@ -503,22 +536,20 @@ class RealtimeCompactor:
         closing: list[str] = []
         self._end_run(closing)
         output.append(self._store(closing))
-        # Trailing blank lines: kept for code (exact), dropped for prose.
-        if self._technical and self._blank_newlines:
-            tail = "".join(self._blank_newlines)
-            if self._retain_output:
-                self._output_parts.append(tail)
-            output.append(tail)
-        self._blank_newlines = []
         return "".join(output)
+
+    def _retained(self, parts: list[str]) -> str:
+        if not self._retain:
+            raise RuntimeError("this compactor was created with retain=False and keeps no text")
+        return "".join(parts)
 
     @property
     def original(self) -> str:
-        return "".join(self._original_parts)
+        return self._retained(self._original_parts)
 
     @property
     def compacted(self) -> str:
-        return "".join(self._output_parts)
+        return self._retained(self._output_parts)
 
     @property
     def in_tokens(self) -> int:
@@ -569,66 +600,58 @@ def compact_stream(
     chunks: Iterable[str],
     *,
     redact_secrets: bool = True,
-    redaction_mode: RedactionMode | None = None,
+    redaction_mode: str | None = None,
     tokenizer: TokenizerLike | None = None,
     aggressive: bool = False,
     dedupe: str | None = None,
 ) -> Iterator[str]:
-    compactor = RealtimeCompactor(
-        redact_secrets=redact_secrets,
-        redaction_mode=redaction_mode,
-        tokenizer=tokenizer,
-        aggressive=aggressive,
-        dedupe=dedupe,
-    )
-    for chunk in chunks:
-        emitted = compactor.feed(chunk)
-        if emitted:
-            yield emitted
-    final = compactor.finish()
-    if final:
-        yield final
+    """Compact an iterable of chunks lazily in constant memory. Options are validated when this is
+    called, not on the first ``next()``, so a bad option fails even for an empty stream."""
+    compactor = RealtimeCompactor(tokenizer=tokenizer, aggressive=aggressive, dedupe=dedupe, retain=False)
+
+    def run() -> Iterator[str]:
+        for chunk in chunks:
+            emitted = compactor.feed(chunk)
+            if emitted:
+                yield emitted
+        final = compactor.finish()
+        if final:
+            yield final
+
+    return run()
 
 
 def compact_text(
     text: str,
     *,
     redact_secrets: bool = True,
-    redaction_mode: RedactionMode | None = None,
+    redaction_mode: str | None = None,
     aggressive: bool = False,
     dedupe: str | None = None,
 ) -> str:
-    """Compact ``text``. Repeated lines are kept unless ``dedupe`` (or ``aggressive=True``) says
-    otherwise; see ``RealtimeCompactor`` for the modes and which of them are lossy."""
+    """Compact ``text``. By default the text is returned unchanged; ``dedupe`` (or ``aggressive=True``)
+    opts into handling repeated lines, see ``RealtimeCompactor`` for the modes and which are lossy.
+    ``redact_secrets``/``redaction_mode`` are accepted for backwards compatibility and ignored."""
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    _resolve_dedupe(dedupe, aggressive)  # validate even for empty input
-    if not text:
-        return ""
-    if redaction_mode is None:
-        redaction_mode = "common" if redact_secrets else "off"
-    _validate_redaction_mode(redaction_mode)
-    return _compact_lines(text, redact_mode=redaction_mode, aggressive=aggressive, dedupe=dedupe)
+    if _resolve_dedupe(dedupe, aggressive) == "off" or not text:  # validated even for empty input
+        return text
+    return _compact_lines(text, aggressive=aggressive, dedupe=dedupe)
 
 
 def compact_text_with_metrics(
     text: str,
     *,
     redact_secrets: bool = True,
-    redaction_mode: RedactionMode | None = None,
+    redaction_mode: str | None = None,
     tokenizer: TokenizerLike | None = None,
     aggressive: bool = False,
     dedupe: str | None = None,
 ) -> CompactionResult:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    compacted = compact_text(
-        text,
-        redact_secrets=redact_secrets,
-        redaction_mode=redaction_mode,
-        aggressive=aggressive,
-        dedupe=dedupe,
-    )
+    _check_tokenizer(tokenizer)
+    compacted = compact_text(text, aggressive=aggressive, dedupe=dedupe)
     in_tokens, exact, source = _token_count_with(tokenizer, text)
     out_tokens, _, _ = _token_count_with(tokenizer, compacted)
     change = 0.0 if in_tokens == 0 else (1.0 - out_tokens / in_tokens) * 100.0

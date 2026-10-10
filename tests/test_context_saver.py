@@ -65,21 +65,6 @@ def test_none_values_are_not_saved_as_literal_none():
     assert result.snapshot.current_task == "" and result.snapshot.bugs == ("real bug",)
 
 
-def test_secret_values_are_redacted_without_redacting_bare_apikey():
-    state = sample_state(); state["commands"] = ["api_key=SUPERSECRET", "api-key=OTHERSECRET", "apikey=keep-this-text", "Bearer abc", "Bearer abcdefghijklmnop"]
-    result = ContextSaver().save(state)
-    assert "api_key=[REDACTED]" in result.snapshot.commands
-    assert "api-key=[REDACTED]" in result.snapshot.commands
-    assert "apikey=keep-this-text" in result.snapshot.commands
-    assert "Bearer abc" in result.snapshot.commands
-    assert "Bearer [REDACTED]" in result.snapshot.commands
-
-
-def test_secret_redaction_is_fingerprint_stable():
-    a = sample_state(); b = sample_state(); a["commands"] = ["api_key=SECRET_ONE"]; b["commands"] = ["api_key=SECRET_TWO"]
-    assert ContextSaver().save(a).fingerprint == ContextSaver().save(b).fingerprint
-
-
 def test_persistent_fingerprint_survives_new_saver_instance(tmp_path):
     path = tmp_path / "context-state.json"
     first = ContextSaver(state_path=path).save(sample_state())

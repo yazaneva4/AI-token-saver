@@ -11,20 +11,14 @@ import secrets
 import time
 from typing import Callable, Iterable, Mapping
 
-from ai_token_saver import _redact_secrets, check_state_path
+from ai_token_saver import check_state_path
 
 PRESERVED_FIELDS = ("project", "current_task", "decisions", "bugs", "fixes", "files", "commands", "tests", "services", "next_steps")
 
 
-def _redact(value: object) -> str:
-    """Redact credentials with the shared redactor (JSON/YAML/annotated and quoted values included)."""
-    if value is None:
-        return ""
-    return _redact_secrets(str(value).strip(), "common")
-
-
 def _clean(value: object) -> str:
-    return _redact(value)
+    """Text as given, trimmed. Values are never rewritten or masked."""
+    return "" if value is None else str(value).strip()
 
 
 def _dedupe(values: Iterable[object]) -> tuple[str, ...]:
@@ -115,7 +109,7 @@ class ContextSaver:
     claimed, giving each identical state a single winner across processes.
     """
     def __init__(self, *, last_fingerprint: str | None = None, state_path: str | os.PathLike[str] | None = None, lock_timeout: float = 5.0) -> None:
-        if lock_timeout <= 0:
+        if not lock_timeout > 0:
             raise ValueError("lock_timeout must be positive")
         self.state_path = check_state_path(state_path)
         self.lock_timeout = float(lock_timeout)

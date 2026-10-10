@@ -4,7 +4,7 @@ A compact, model-agnostic token and context-saving tool designed to work with **
 
 ## What it does
 
-AI Token Saver performs **real, measured compaction**. By default it **keeps every line**: it only collapses runs of blank lines (one blank line is kept between paragraphs) and normalises line endings, because a repeated line can be a separate event, instruction or message. Removing repeats is opt-in through `dedupe=`: `"runs"` replaces a long run of identical lines by the line plus a count (information-preserving), while `"adjacent"` and `"global"` (and `aggressive=True`) are **explicitly lossy**. Code, structured data, Markdown structure, list items and log/event records are never touched in any mode.
+AI Token Saver performs **real, measured compaction**. By default it **returns the input unchanged**: every line, blank line, indentation and line ending (`\n`, `\r\n`, `\r`) stays as it was, because a repeated line can be a separate event, instruction or message and whitespace can be meaningful (YAML block scalars, CSV quoted fields, Markdown, Python). Removing repeats is opt-in through `dedupe=`: `"runs"` replaces a long run of identical lines by the line plus a count and is **exactly reversible** with `expand_runs`, while `"adjacent"` and `"global"` (and `aggressive=True`) are **explicitly lossy**. Code, structured data, Markdown structure, list items and log/event records are never touched in any mode.
 
 It also supports **real-time incremental compaction**: chunks can be fed as they arrive, and newly completed safe lines are emitted immediately instead of waiting for the complete input.
 
@@ -20,7 +20,8 @@ It provides:
 - 📏 Before/after token measurement with either a supplied tokenizer or an explicit approximate fallback
 - 🤖 Model/provider-agnostic skill instructions
 - 🔌 Designed to adapt to different AI assistants and coding agents
-- 🔐 Configurable secret-looking-value redaction
+- 🔁 Reversible `runs` compression (`expand_runs(compact_text(x, dedupe="runs")) == x` for any string)
+- 🧾 Your text is never rewritten by credential detection: API keys, passwords and config values pass through as written
 
 ## Safety-first compaction
 
@@ -98,23 +99,9 @@ does **not** independently verify that the supplied counter matches the target m
 `token_count_source` is `"supplied-tokenizer"` when a counter is supplied and
 `"approximate"` otherwise.
 
-## Redaction modes
+## Credentials and configuration values
 
-Secret-looking values are redacted by default. You can choose:
-
-- `off` — no redaction
-- `common` — key-name based secrets (`password`, `secret`, `api_key`, `access_token`, ... including `DB_PASSWORD`-style names, in `.env`, JSON, YAML and Python), Bearer/Basic headers, `sk-`/AWS/GitHub/Slack tokens, JWTs, URL credentials and PEM private keys
-- `strict` — common patterns plus additional Google-style key detection
-
-Example:
-
-```python
-from ai_token_saver import compact_text
-
-safe = compact_text("api_key=SECRET123", redaction_mode="common")
-```
-
-Redaction is best-effort pattern matching, **not a security boundary, a credential manager or a guarantee of secret detection**. It cannot find a secret stored under a name it does not recognise, and a missed secret is sent on as written. Keep real credentials out of the text you compact in the first place.
+AI Token Saver is a token and context optimisation tool, not a secret manager. It does not detect, mask or replace credentials: API keys, passwords, tokens, connection strings and private keys in the text you give it come out exactly as they went in (there is no `[REDACTED]` substitution, no secret scanner and no `redaction.py`). The old `redact_secrets=` and `redaction_mode=` arguments are still accepted so existing code keeps working, but they are ignored. Savers that persist state (`ContextSaver`, `UsageCheckpoint`) store the values you give them as given; keep what you do not want written to disk out of the state you save. Nothing is logged, published or sent anywhere by this library, and it needs no API key or login.
 
 ## Available for AI assistants
 
@@ -133,7 +120,6 @@ AI-token-saver/
 ├── SKILL.md                  # the skill
 ├── README.md
 ├── ai_token_saver.py         # core compaction engine (Python API)
-├── redaction.py              # secret redaction (lossy, separate from compaction)
 ├── context_saver.py          # context snapshots
 ├── usage_saver.py            # idempotent usage checkpoints
 ├── realtime_usage_saver.py   # real-time incremental saver
@@ -202,8 +188,8 @@ GitHub Actions runs the test suite on pushes and pull requests across Python
 
 The test suite covers the repeated-line modes, code preservation, aggressive-mode
 safety, newline preservation, exact/approximate token measurement, reduction bounds,
-memory merging, JSON round-tripping, malformed-memory handling, redaction modes,
-real-time chunked compaction, CRLF chunks, and input validation.
+memory merging, JSON round-tripping, malformed-memory handling, exact `runs` round trips, preserved credentials and whitespace,
+real-time chunked compaction at arbitrary boundaries, CRLF chunks, bounded memory, and input validation.
 
 ## Practical usage-saving rules
 
@@ -241,9 +227,9 @@ The goal is **less context, not less meaning**.
 
 ## Safety
 
-Never intentionally put secrets into AI Token Saver memory. Text compaction
-redacts common secret-looking values by default. This is a safety layer, not a
-guaranty of secret detection; do not rely on it as a credential manager.
+Text compaction does not touch credentials and is not a credential manager. Saved
+memory and context files are written to disk exactly as given, so do not put values
+in them that must not be stored.
 
 ## Status
 
@@ -279,45 +265,44 @@ Executor effort follows the task tier (low / medium / high; ultra work runs at h
 
 ## Processing levels and limits
 
-Compaction is split into levels, and redaction is kept apart from all of them:
+Compaction is split into levels:
 
 | Level | What it does | Lossless? |
 |---|---|---|
-| Normalisation | Line endings (`\r\n`, `\r`) become `\n`; only these three are line breaks, so U+2028, form feeds and similar stay in the text | Yes, apart from line endings |
-| Default (`dedupe="off"`) | Collapses blank-line runs beyond one paragraph break. Removes **no** line. Code keeps its blank lines exactly | Yes, apart from blank-line runs and line endings |
-| `dedupe="runs"` | A long run of identical consecutive **prose** lines becomes the line plus `[previous line repeated N more times]`, only when that is shorter. Never applied to code, structured data, Markdown structure, list items, paths, counts or log/event records | Yes: the count is kept and the original can be rebuilt. An input line that already looks like a marker is ambiguous for machine decoding |
+| Default (`dedupe="off"`) | Identity: returns the text unchanged, including blank lines, indentation, trailing spaces and the original line endings. Only `\n`, `\r\n` and `\r` are line breaks, so U+2028, form feeds and similar stay in the text | Yes, byte for byte |
+| `dedupe="runs"` | A long run of identical consecutive **prose** lines becomes the line plus `[previous line repeated N more times]`, only when that is shorter. Never applied to code, structured data, Markdown structure, list items, paths, counts or log/event records | Yes, exactly: `expand_runs(compact_text(x, dedupe="runs")) == x` for every string. A run needs the same text **and** the same line ending, an input line that looks like a marker is given one extra leading backslash (removed again by `expand_runs`), and so compacting already compacted text a second time is not a no-op |
 | `dedupe="adjacent"` | Drops a prose line identical to the previous one | **No: lossy**, the repeat count is lost |
 | `dedupe="global"` / `aggressive=True` | Drops any repeated prose line anywhere | **No: lossy** |
-| Redaction | Replaces credentials with `[REDACTED]`; see below | No, never counted as lossless |
 
-`compact_text` and `compact_stream` use one engine, so for any chunking, including one character at a time and splits inside `\r\n`, streaming output equals batch output. When the final input line is a removed duplicate and the input has no final newline, the output ends with one newline because a stream cannot take back a newline it already sent. Conservative mode is idempotent. Aggressive mode decides over a 4-line lookahead window, so a second pass may remove more but never adds content.
-
-**Redaction** (`redact_secrets`, mode `common` or `strict`) masks, by key name or token shape: `password`/`secret`/`api_key`/`access_token`/`auth_token`/`private_key`/`passwd` values including prefixed and suffixed names (`DB_PASSWORD`, `client_secret`), Bearer/Basic/Token headers, `sk-` keys, AWS access key ids, GitHub and Slack tokens, JWTs, `scheme://user:password@host` URLs, and PEM private keys (the BEGIN/END lines stay). Quoted values keep their quotes; arrays and objects under a secret key keep their shape with every scalar masked, including across lines. Code that only reads a secret (`password = get_password()`, `self.password = password`, `connect(password=pw)`, `os.environ[...]`, `$VAR`) is left alone, so Python and JSON stay parseable. Limits: matching is by key name, so a secret under an unrecognised name is not found; a bare identifier assigned to a secret key (`password = hunter2`) is redacted because it cannot be told apart from a `.env` value; a secret array or private key that never closes stops being masked after 500 lines.
+`compact_text` and `compact_stream` use one engine, so for any chunking, including one character at a time and splits inside `\r\n`, streaming output equals batch output. In the default mode the stream simply echoes each chunk. In the other modes a trailing `\r` is held until the next chunk shows whether it is a `\r\n`. When the final input line is a removed duplicate and the input has no final newline, the output ends with the previous line's ending because a stream cannot take back a newline it already sent. Aggressive-mode idempotence is as below. Aggressive mode decides over a 4-line lookahead window, so a second pass may remove more but never adds content.
 
 `RealtimeUsageSaver(..., suppress_unchanged=True)` holds output until `finish()` and emits nothing when the input matches the saved fingerprint (the held output grows with the input). The default still streams immediately and reports repetition through `result.changed`.
 
 ## Reliability notes
 
 - **Memory files** (`save_memory`) are written atomically: a failed or interrupted save leaves the previous file intact, an existing file keeps its permissions, and a symlink is written through. `memory_to_text` indents continuation lines of a multi-line entry, so an entry cannot pose as a section header or another bullet. `Memory.from_dict` ignores booleans, NaN/infinity, nulls and containers in list fields.
-- **Fingerprints** of sets are independent of the process hash seed. `RealtimeUsageSaver` fingerprints now include the `dedupe` mode (format v2), so state saved by an older version counts as changed once. A `state_path` that is a directory is rejected up front.
+- **Fingerprints** of sets are independent of the process hash seed. `RealtimeUsageSaver` fingerprints now include the `dedupe` mode (format v3, since redaction was removed), so state saved by an older version counts as changed once. A `state_path` that is a directory is rejected up front.
 - **Custom providers** (`AITS_CUSTOM_PROVIDERS`): only `{model}` and `{effort}` are placeholders in a `cmd` template; every other brace is literal and there is no `{{ }}` escaping. The variable defines commands that will be run, so treat it as trusted configuration. A non-object provider spec or a non-string `cmd` is a `ValueError`.
 - **`delegate.py`** reports unreadable input files as `delegate: ...` with exit code 1, accepts `--dedupe off|runs|adjacent|global`, and `route()` rejects a non-string task kind with `TypeError`.
+- **Options** are validated the same way everywhere, including for empty input and for `compact_stream` before its first `next()` (`dedupe` must be one of `off|runs|adjacent|global`, `tokenizer` a callable or an object with `encode`). `RealtimeCompactor(retain=False)` and `RealtimeUsageSaver(retain=False)` keep neither the input nor the output (constant memory; `original`/`compacted`/`result()` then raise or are `None`); `compact_stream` always runs that way, and the usage saver fingerprints the stream incrementally instead of keeping a copy.
 - **Memory use**: per-line classification is cached only for short lines, and `dedupe="global"` remembers long lines as 16-byte digests, so a stream of long unique lines is not retained.
 
 ## Measured results (read before quoting a percentage)
 
-`python benchmarks/compression_round2.py` compacts ten datasets (about 1 MB each) four ways with redaction **off**, so only compaction is measured, and counts tokens with the Tekken BPE tokenizer (a real subword tokenizer, **not Claude's**). "Intact" means every line and its repeat count is still present; "lossless" for `runs` means expanding the markers reproduces the input exactly.
+`python benchmarks/compression_round2.py` compacts ten datasets (about 1 MB each) four ways and counts tokens with the Tekken BPE tokenizer (a real subword tokenizer, **not Claude's**). "Intact" means every line and its repeat count is still present; "lossless" for `runs` means expanding the markers reproduces the input exactly.
 
 | Dataset | default | `runs` (lossless) | `adjacent` (lossy, lines dropped) |
 |---|---|---|---|
 | 16,000 identical lines, **synthetic best case** (180,323 tokens) | 0.00%, intact | 99.99% | 99.99% (16,392) |
 | Retry/poll output (repeated status lines, 193,020 tokens) | 0.00%, intact | 98.18% | 98.94% (26,584) |
 | Coding-agent transcript, Python, JavaScript, project memory, JSON, YAML, multilingual | 0.00%, intact | 0.00% | 0.00% (0) |
-| Non-repetitive prose | 0.04% | 0.04% | 0.04% |
+| Non-repetitive prose | 0.00%, intact | 0.00% | 0.00% |
 
 So: **99.8% and above is a best case that exists only for pure repetition**, and the default never claims it, because the default removes nothing. Typical coding-agent text, source code, JSON and YAML contain no adjacent repeated prose and save about 0% in every mode; real savings there would need a different technique. Parsed Python, JSON and YAML are identical to the input in every mode. An earlier engine reported extra savings on JSON only by deleting equal neighbouring values, which changes the data.
 
-`python benchmarks/stress_round2.py [--dedupe MODE] [--engine-dir DIR]` runs 69 bounded cases (1 KB to 100 MB, one-character chunks, random chunking, malformed input, 100,000 repeated lines, threads) in separate subprocesses with an 8 GB cap. On the reference machine all 69 pass in every mode; 100 MB inputs take 5 to 34 s (about 3 to 10 MB/s; secret-heavy text is the slowest) with working memory of roughly 3 times the input. `python benchmarks/audit_compare.py` compares against a git baseline.
+`python benchmarks/stress_round2.py [--dedupe MODE] [--engine-dir DIR]` runs 69 bounded cases (1 KB to 100 MB, one-character chunks, random chunking, malformed input, 100,000 repeated lines, threads) in separate subprocesses with an 8 GB cap. On the reference machine all 69 pass in every mode; 100 MB inputs take 5 to 34 s (about 3 to 10 MB/s; see below) with working memory of roughly 3 times the input. `python benchmarks/audit_compare.py` compares against a git baseline.
+
+**Round 4 stress comparison** (63 cases up to 10 MB, `--max-mb 10`, same machine, run against the previous `main` with `--engine-dir`; all cases pass in every mode): total time default 46.9 s → 1.1 s (the default is now a pass-through), `runs` 46.6 s → 32.0 s, `adjacent` 46.3 s → 31.1 s; worst-case working memory above the input 188 MB → 74 MB (default), 153 MB → 93 MB (`runs`), 153 MB → 94 MB (`adjacent`). Part of the line-based speedup is that redaction no longer runs. Python 3.10, 3.11, 3.12 and 3.13: 3367 tests pass on each.
 
 ## Other agents and providers (GPT, Gemini, local models)
 

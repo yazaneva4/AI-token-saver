@@ -58,21 +58,6 @@ def test_malformed_memory_has_safe_defaults(tmp_path):
     assert memory.state == []
 
 
-def test_secret_redaction_requires_real_api_key_separator():
-    source = "api_key=SECRET123 api-key=SECRET456 apikey=KEEP_ME"
-    result = compact_text(source)
-    assert "SECRET123" not in result
-    assert "SECRET456" not in result
-    assert "apikey=KEEP_ME" in result
-
-
-def test_bearer_redaction_requires_minimum_length():
-    source = "Bearer short Bearer abcdefghijklmnop"
-    result = compact_text(source)
-    assert "Bearer short" in result
-    assert "abcdefghijklmnop" not in result
-
-
 def test_code_hints_protect_single_hint_lines_from_aggressive_deduplication():
     for line in ('print("hello")', "value = lambda x: x + 1", "yield value", "raise ValueError()", "assert value", "with open('x') as f:", "try:", "except ValueError:", "async def run():", "return value", "import os"):
         source = f"{line}\n{line}\n"
@@ -92,12 +77,3 @@ def test_nontechnical_prose_still_deduplicates_aggressively():
     result = compact_text(source, aggressive=True)
     assert result == "hello world\n"
 
-
-def test_secret_redaction():
-    source = "api_key=SECRET123 password=hunter2 Bearer abcdefghijklmnop sk-abcdefghijklmnopqrstuvwxyz"
-    result = compact_text(source)
-    assert "SECRET123" not in result
-    assert "hunter2" not in result
-    assert "abcdefghijklmnop" not in result
-    assert "sk-abcdefghijklmnopqrstuvwxyz" not in result
-    assert "[REDACTED]" in result

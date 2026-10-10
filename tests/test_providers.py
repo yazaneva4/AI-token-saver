@@ -78,6 +78,29 @@ def test_main_providers_models_are_preferred_then_others():
     assert steps(route("summary", main="gpt-5", providers=only_claude, env={})) == [("claude", "haiku", "executor")]
 
 
+def test_main_provider_keeps_its_own_tiers_even_when_other_clis_are_installed():
+    claude_full = {"light": "haiku", "standard": "sonnet", "deep": "opus"}
+    both = {"claude": claude_full, "codex": {"standard": "gpt-std"}}
+    # GPT main: GPT's only tier is used for every kind of work; Claude's exact tier is NOT borrowed.
+    assert steps(route("summary", main="gpt-5", providers=both, env={})) == [("codex", "gpt-std", "executor")]
+    assert all(s.cli == "codex" for k in ("summary", "edit", "plan", "release")
+               for s in route(k, main="gpt-5", providers=both, env={}).steps)
+    # Claude main: Claude's own tiers, exact.
+    assert steps(route("summary", main="opus", providers=both, env={})) == [("claude", "haiku", "executor")]
+    # Unknown vendor main (no provider of its own): exact tiers from the configured order.
+    assert steps(route("summary", main="llama-3", providers=both, env={})) == [("claude", "haiku", "executor")]
+    # GPT main with no GPT provider: falls back to the others, same tier.
+    assert steps(route("summary", main="gpt-5", providers={"claude": claude_full}, env={})) == [("claude", "haiku", "executor")]
+
+
+def test_own_provider_uses_nearest_own_tier_not_exact_foreign_tier():
+    cat = catalog({}, {"claude": {"light": "haiku", "standard": "sonnet", "deep": "opus"},
+                       "codex": {"standard": "g", "deep": "p"}})
+    assert resolve(cat, "haiku", "gpt-5") == ("codex", "g", "sonnet")
+    assert resolve(cat, "opus", "gpt-5") == ("codex", "p", "opus")
+    assert resolve(cat, "haiku", "claude-opus") == ("claude", "haiku", "haiku")
+
+
 def test_empty_provider_list_means_the_main_model_works_alone():
     for mode in ("auto", "one", "mix"):
         r = route("edit", main="gpt-5", mode=mode, providers={}, env={})

@@ -293,7 +293,7 @@ Known limits: a bare unquoted identifier assigned to a secret key outside a call
 
 ## Other agents and providers (GPT, Gemini, local models)
 
-The tiers are provider-neutral: Haiku = light, Sonnet = standard, Opus = deep. `--main gpt-5` (or `AITS_MAIN_MODEL`) places the main model in a tier by name, and sub-agents come from the providers available in the *same tier*, preferring the main model's own provider. A missing tier falls back to the nearest one; with no provider the main model works alone, and no Claude model is used when Claude is not available.
+Tiers are labels matched by model name, not a power ranking across vendors: nothing here judges whether a GPT model is stronger than a Claude model. The tiers are provider-neutral: Haiku = light, Sonnet = standard, Opus = deep. `--main gpt-5` (or `AITS_MAIN_MODEL`) places the main model in a tier by name, and sub-agents come from the main model's *own* provider and its own tier models, even when other providers' CLIs are installed (a GPT main keeps to GPT tiers, a Claude main to Claude tiers). Another provider is used only when the main model's provider has no model, matched by tier. A tier the own provider lacks falls back to its nearest tier; with no provider the main model works alone, and no Claude model is used when Claude is not available.
 
 | Setting | Meaning |
 |---|---|

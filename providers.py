@@ -143,18 +143,30 @@ def order(cat: dict[str, dict], main: str | None) -> list[str]:
     return ([first] if first in cat else []) + [n for n in names if n != first]
 
 
-def resolve(cat: dict[str, dict], rank: str, main: str | None = None) -> tuple[str, str, str] | None:
-    """(provider, model, effective_rank) for ``rank``: an exact tier match from the first
-    provider that has one, else the nearest tier any provider has (higher wins ties)."""
-    names = order(cat, main)
-    for name in names:
-        if rank in cat[name]["tiers"]:
-            return name, cat[name]["tiers"][rank], rank
+def _nearest(cat: dict[str, dict], names: list[str], rank: str) -> tuple[str, str, str] | None:
     best = None
     for name in names:
         for have, model in cat[name]["tiers"].items():
             distance = abs(RANKS.index(have) - RANKS.index(rank))
-            key = (distance, -RANKS.index(have))
+            key = (distance, -RANKS.index(have))  # nearest tier; the stronger one wins a tie
             if best is None or key < best[0]:
                 best = (key, name, model, have)
     return None if best is None else (best[1], best[2], best[3])
+
+
+def resolve(cat: dict[str, dict], rank: str, main: str | None = None) -> tuple[str, str, str] | None:
+    """(provider, model, effective_rank) for ``rank``.
+
+    The main model's own provider is used first, at its nearest tier, even when other
+    providers' CLIs are installed: a GPT main keeps to GPT tiers and a Claude main to
+    Claude tiers. Other providers are used only when the main model's provider has no
+    model at all, and then an exact tier match wins before the nearest tier.
+    """
+    names = order(cat, main)
+    own = provider_of_model(main)
+    if own in cat and cat[own]["tiers"]:
+        return _nearest(cat, [own], rank)
+    for name in names:
+        if rank in cat[name]["tiers"]:
+            return name, cat[name]["tiers"][rank], rank
+    return _nearest(cat, names, rank)

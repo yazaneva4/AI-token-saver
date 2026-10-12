@@ -203,7 +203,7 @@ real-time chunked compaction at arbitrary boundaries, CRLF chunks, bounded memor
 
 ## Practical usage-saving rules
 
-The companion [skill instructions](SKILL.md#everyday-token-saving-workflow) apply these habits across assistants. They reduce avoidable context and usage; they cannot change a provider's quota or guarantee unlimited access.
+The companion [skill instructions](references/workflow-and-output.md#everyday-token-saving-workflow) apply these habits across assistants. They reduce avoidable context and usage; they cannot change a provider's quota or guarantee unlimited access.
 
 - Revise a request before sending when practical; use follow-ups whenever needed for clarity.
 - Start a fresh chat when the task changes or old context is no longer useful, carrying over a compact handoff. Message-count suggestions are only rough reminders.

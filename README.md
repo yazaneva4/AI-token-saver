@@ -271,7 +271,7 @@ Executor effort follows the task tier (low / medium / high; ultra work runs at h
 
 ## Measuring savings
 
-`python benchmarks/e2e_savings.py [--json]` reports, per workload, context tokens (raw vs compacted), input tokens (raw vs the prepared request, including the output-style line), the sub-agent plan the `auto` optimizer picks, and the modeled main-model token saving. It runs offline. Reply (output) tokens depend on a live model and are not measured; the report shows only how many tokens each output level adds to the prompt. Savings vary by workload, from about 99% on heavily repeated history to roughly 0% on distinct text, and are never guaranteed.
+`python benchmarks/e2e_savings.py [--json]` reports, per workload, context tokens (raw vs compacted), input tokens (raw vs the prepared request, including the output-style line), the sub-agent plan the `auto` optimizer picks, and the modeled main-model token saving. It runs offline. Reply (output) tokens depend on a live model and are not measured; the report shows only how many tokens each output level adds to the prompt. Savings vary by workload, from about 99% on heavily repeated history to roughly 0% on distinct text, and are never guaranteed. The "ctx %" figure comes from deduplicating repeated facts in structured state (`ContextSaver`), not from the text compactor, and distinct history can show a small negative saving (about -0.05% context, -1.61% input).
 
 ## What savings to expect
 

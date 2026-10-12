@@ -118,7 +118,8 @@ installation method can vary. The core memory-saving rules remain provider-agnos
 
 ```text
 AI-token-saver/
-├── SKILL.md                  # the skill
+├── SKILL.md                  # the skill (kept short: about 850 tokens to load)
+├── references/               # longer skill text, read only when needed
 ├── README.md
 ├── ai-token-saver.zip        # ready-to-install skill package (SKILL.md plus the Python modules)
 ├── ai_token_saver.py         # core compaction engine (Python API)
@@ -136,7 +137,7 @@ AI-token-saver/
 
 ## Installing the skill
 
-`ai-token-saver.zip` in the repository root is the packaged skill: a single `ai-token-saver/` folder holding `SKILL.md` and the Python modules (no `redaction.py`). Upload it wherever your assistant accepts a skill package (for example Claude's Skills settings), or unzip it into the assistant's skills directory. It is rebuilt from `main` when the code changes; the zip is not needed to use the Python library.
+`ai-token-saver.zip` in the repository root is the packaged skill: a single `ai-token-saver/` folder holding `SKILL.md`, `references/` and the Python modules (no `redaction.py`). Upload it wherever your assistant accepts a skill package (for example Claude's Skills settings), or unzip it into the assistant's skills directory. It is rebuilt from `main` when the code changes; the zip is not needed to use the Python library.
 
 ## Quick start
 
@@ -271,6 +272,25 @@ Executor effort follows the task tier (low / medium / high; ultra work runs at h
 ## Measuring savings
 
 `python benchmarks/e2e_savings.py [--json]` reports, per workload, context tokens (raw vs compacted), input tokens (raw vs the prepared request, including the output-style line), the sub-agent plan the `auto` optimizer picks, and the modeled main-model token saving. It runs offline. Reply (output) tokens depend on a live model and are not measured; the report shows only how many tokens each output level adds to the prompt. Savings vary by workload, from about 99% on heavily repeated history to roughly 0% on distinct text, and are never guaranteed.
+
+## What savings to expect
+
+One row per technique, with how sure the number is. **Measured** means this repository's benchmarks produced it (Tekken BPE tokenizer, not Claude's); **Modeled** comes from the offline estimates in `benchmarks/e2e_savings.py`; **Estimate** is a typical range this repository cannot measure, because it needs a live model. Nothing here is a guarantee.
+
+| Technique | Realistic saving | Evidence | Works when | Little or no gain when |
+|---|---|---|---|---|
+| Text compactor, default (`dedupe="off"`) | 0% by design | Measured | Always safe: returns the text unchanged | Always; it is a pass-through |
+| Text compactor on real code, logs, JSON, YAML, transcripts, prose (any mode) | About 0%, well under 1% | Measured on 10 datasets of about 1 MB | Rarely: only adjacent repeated prose exists | Nearly always; code, lists, commands and log records are never touched |
+| `dedupe="runs"` on retry/poll output | About 98% | Measured (98.18%, exactly reversible) | Long runs of one identical prose line | Repeats are separated by other lines or are log records with timestamps |
+| `dedupe="runs"` on pure repetition | 99.99% | Measured, synthetic best case | Input is one line repeated | Anything else; do not quote this as typical |
+| `dedupe="adjacent"` / `"global"` | Up to 99.4% on repetitive input | Measured; lossy, repeat counts are lost | You accept losing how many times a line appeared | You need every occurrence or its count |
+| Output level `tight` | Roughly 20 to 40% of reply tokens | Estimate | Replies carry preambles, recaps and offers of help | Replies are already short or are mostly code |
+| Output level `max` | 90% or more | Estimate | The answer is a command, value or patch | The task needs explanation |
+| Sending deltas instead of resending history | Depends on the project; often the largest saving in long sessions | Modeled (`benchmarks/e2e_savings.py`) | Long projects where most context is unchanged | Short sessions, or when history changes every turn |
+| Cheaper sub-agents for bulk work (Haiku tier) | Saves main-model tokens, not total tokens | Modeled (`auto` optimizer reports main-model tokens saved) | Lookups, summaries, bulk edits | Small tasks: delegation overhead exceeds the gain |
+| Loading the skill itself | Costs about 850 tokens (was about 4,700) | Measured with the Tekken tokenizer; Claude's count differs | Reference files load only when needed | Very short sessions still pay the fixed cost once |
+
+How to read it: the compactor only helps on pure repetition. Most real savings in long sessions come from sending less (deltas, references, right-sized sub-agents) and answering less (output levels), and those depend on your workload. Measure with `python benchmarks/e2e_savings.py` and `python benchmarks/compression_round2.py`, and report your own numbers.
 
 ## Processing levels and limits
 

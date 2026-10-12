@@ -95,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
               f"{r['plan']} / {r['main_tokens_saved_pct']}% / {r['combined_main_pct']}%")
     print("output-style instruction cost (tokens added to prompt):", res["output_instruction_tokens"])
     print(res["note"])
+    print("Note: the ctx % figure comes from deduplicating repeated facts in structured state (ContextSaver), "
+          "not from the text compactor; distinct history can show a small negative saving (about -0.05% context, -1.61% input).")
     return 0
 
 

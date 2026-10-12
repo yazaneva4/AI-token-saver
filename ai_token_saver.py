@@ -756,3 +756,10 @@ def memory_to_text(memory: Memory) -> str:
             sections.append(title + ":\n" + "\n".join(f"- {_block(value)}" for value in entries))
 
     return "\n\n".join(sections)
+
+
+if __name__ == "__main__":
+    import sys
+
+    print("ai_token_saver.py is a Python library with no command-line interface. See the Python usage section of README.md.", file=sys.stderr)
+    sys.exit(2)

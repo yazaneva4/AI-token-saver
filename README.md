@@ -203,7 +203,7 @@ real-time chunked compaction at arbitrary boundaries, CRLF chunks, bounded memor
 
 ## Practical usage-saving rules
 
-The companion [skill instructions](SKILL.md#everyday-token-saving-workflow) apply these habits across assistants. They reduce avoidable context and usage; they cannot change a provider's quota or guarantee unlimited access.
+The companion [skill instructions](references/workflow-and-output.md#everyday-token-saving-workflow) apply these habits across assistants. They reduce avoidable context and usage; they cannot change a provider's quota or guarantee unlimited access.
 
 - Revise a request before sending when practical; use follow-ups whenever needed for clarity.
 - Start a fresh chat when the task changes or old context is no longer useful, carrying over a compact handoff. Message-count suggestions are only rough reminders.
@@ -271,7 +271,7 @@ Executor effort follows the task tier (low / medium / high; ultra work runs at h
 
 ## Measuring savings
 
-`python benchmarks/e2e_savings.py [--json]` reports, per workload, context tokens (raw vs compacted), input tokens (raw vs the prepared request, including the output-style line), the sub-agent plan the `auto` optimizer picks, and the modeled main-model token saving. It runs offline. Reply (output) tokens depend on a live model and are not measured; the report shows only how many tokens each output level adds to the prompt. Savings vary by workload, from about 99% on heavily repeated history to roughly 0% on distinct text, and are never guaranteed.
+`python benchmarks/e2e_savings.py [--json]` reports, per workload, context tokens (raw vs compacted), input tokens (raw vs the prepared request, including the output-style line), the sub-agent plan the `auto` optimizer picks, and the modeled main-model token saving. It runs offline. Reply (output) tokens depend on a live model and are not measured; the report shows only how many tokens each output level adds to the prompt. Savings vary by workload, from about 99% on heavily repeated history to roughly 0% on distinct text, and are never guaranteed. The "ctx %" figure comes from deduplicating repeated facts in structured state (`ContextSaver`), not from the text compactor, and distinct history can show a small negative saving (about -0.05% context, -1.61% input).
 
 ## What savings to expect
 
@@ -331,7 +331,7 @@ So: **99.8% and above is a best case that exists only for pure repetition**, and
 
 `python benchmarks/stress_round2.py [--dedupe MODE] [--engine-dir DIR]` runs 69 bounded cases (1 KB to 100 MB, one-character chunks, random chunking, malformed input, 100,000 repeated lines, threads) in separate subprocesses with an 8 GB cap. On the reference machine all 69 pass in every mode; 100 MB inputs take 5 to 34 s (about 3 to 10 MB/s; see below) with working memory of roughly 3 times the input. `python benchmarks/audit_compare.py` compares against a git baseline.
 
-**Round 4 stress comparison** (63 cases up to 10 MB, `--max-mb 10`, same machine, run against the previous `main` with `--engine-dir`; all cases pass in every mode): total time default 46.9 s → 1.1 s (the default is now a pass-through), `runs` 46.6 s → 32.0 s, `adjacent` 46.3 s → 31.1 s; worst-case working memory above the input 188 MB → 74 MB (default), 153 MB → 93 MB (`runs`), 153 MB → 94 MB (`adjacent`). Part of the line-based speedup is that redaction no longer runs. Python 3.10, 3.11, 3.12 and 3.13: 3367 tests pass on each.
+**Round 4 stress comparison** (63 cases up to 10 MB, `--max-mb 10`, same machine, run against the previous `main` with `--engine-dir`; all cases pass in every mode): total time default 46.9 s → 1.1 s (the default is now a pass-through), `runs` 46.6 s → 32.0 s, `adjacent` 46.3 s → 31.1 s; worst-case working memory above the input 188 MB → 74 MB (default), 153 MB → 93 MB (`runs`), 153 MB → 94 MB (`adjacent`). Part of the line-based speedup is that redaction no longer runs. Python 3.10, 3.11, 3.12 and 3.13: 3369 tests pass on each.
 
 ## Other agents and providers (GPT, Gemini, local models)
 

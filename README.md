@@ -331,7 +331,7 @@ So: **99.8% and above is a best case that exists only for pure repetition**, and
 
 `python benchmarks/stress_round2.py [--dedupe MODE] [--engine-dir DIR]` runs 69 bounded cases (1 KB to 100 MB, one-character chunks, random chunking, malformed input, 100,000 repeated lines, threads) in separate subprocesses with an 8 GB cap. On the reference machine all 69 pass in every mode; 100 MB inputs take 5 to 34 s (about 3 to 10 MB/s; see below) with working memory of roughly 3 times the input. `python benchmarks/audit_compare.py` compares against a git baseline.
 
-**Round 4 stress comparison** (63 cases up to 10 MB, `--max-mb 10`, same machine, run against the previous `main` with `--engine-dir`; all cases pass in every mode): total time default 46.9 s → 1.1 s (the default is now a pass-through), `runs` 46.6 s → 32.0 s, `adjacent` 46.3 s → 31.1 s; worst-case working memory above the input 188 MB → 74 MB (default), 153 MB → 93 MB (`runs`), 153 MB → 94 MB (`adjacent`). Part of the line-based speedup is that redaction no longer runs. Python 3.10, 3.11, 3.12 and 3.13: 3367 tests pass on each.
+**Round 4 stress comparison** (63 cases up to 10 MB, `--max-mb 10`, same machine, run against the previous `main` with `--engine-dir`; all cases pass in every mode): total time default 46.9 s → 1.1 s (the default is now a pass-through), `runs` 46.6 s → 32.0 s, `adjacent` 46.3 s → 31.1 s; worst-case working memory above the input 188 MB → 74 MB (default), 153 MB → 93 MB (`runs`), 153 MB → 94 MB (`adjacent`). Part of the line-based speedup is that redaction no longer runs. Python 3.10, 3.11, 3.12 and 3.13: 3369 tests pass on each.
 
 ## Other agents and providers (GPT, Gemini, local models)
 

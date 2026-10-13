@@ -129,7 +129,7 @@ AI-token-saver/
 ├── provider_adapter.py       # provider-neutral integration and output levels
 ├── providers.py              # provider/tier catalog for sub-agents
 ├── model_router.py           # sub-agent routing and auto optimizer
-├── delegate.py               # command-line script: runner for routed sub-agents
+├── delegate.py               # runner for routed sub-agents
 ├── benchmarks/               # benchmark runner, savings, audit, compression and stress benchmarks
 ├── tests/                    # test suite
 └── .github/workflows/        # CI (tests.yml)
@@ -146,24 +146,9 @@ git clone https://github.com/yazaneva4/AI-token-saver.git
 cd AI-token-saver
 ```
 
-`ai_token_saver.py` is a Python library with no command-line interface (run as a
-script it prints a notice and exits with code 2). See [Python usage](#python-usage)
-below. Without a supplied model tokenizer, token measurements are labeled approximate.
-
-The repository does ship a few separate command-line scripts. They are not part of
-the library and need no install beyond a clone:
-
-| Command | What it does |
-|---|---|
-| `python delegate.py --kind <kind> --main <model> --prompt-file task.txt` | Runs the routed sub-agent plan with your signed-in CLIs ([Sub-agent plan](#sub-agent-plan-main-model-aware)) |
-| `python -m pytest -q` | Runs the test suite |
-| `python -m benchmarks.benchmark_runner` | Quick benchmark smoke suite (the one CI runs) |
-| `python benchmarks/e2e_savings.py [--json]` | Offline savings report ([Measuring savings](#measuring-savings)) |
-| `python benchmarks/compression_round2.py` | Compression percentages on ten datasets |
-| `python benchmarks/stress_round2.py` | Bounded stress test |
-
-To remove repeated lines, pass `dedupe="runs"` (keeps a count) or the lossy `dedupe="adjacent"` / `aggressive=True`.
-Technical-looking content remains protected.
+`ai_token_saver.py` is a Python library with no command-line interface. See
+[Python usage](#python-usage) below. Without a supplied model tokenizer, token
+measurements are labeled approximate.
 
 ## Python usage
 

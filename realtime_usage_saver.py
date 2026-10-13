@@ -116,7 +116,7 @@ class RealtimeUsageSaver:
             return None, None
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + self.lock_timeout
-        stale_after = max(self.lock_timeout * 2, 1.0)
+        stale_after = 1.0  # an empty or unparseable lock is a crash leftover: its writer needs milliseconds, not seconds
         while True:
             token = secrets.token_hex(16)
             try:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields
 from functools import lru_cache, wraps
+import glob
 import hashlib
 import json
 import math
@@ -15,6 +16,7 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+import time
 from typing import Callable, Iterable, Iterator, Literal, Mapping, Protocol
 
 
@@ -135,6 +137,39 @@ def check_state_path(path: str | os.PathLike[str] | None) -> Path | None:
     if resolved.is_dir():
         raise ValueError(f"state_path must be a file, not a directory: {resolved}")
     return resolved
+
+
+def write_state_file(path: Path, text: str) -> None:
+    """Replace ``path`` atomically through a random temp name in the same directory, created with
+    O_EXCL|O_NOFOLLOW so a planted file or symlink can never be written through."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(temporary, flags, 0o666)  # the umask trims this like a normal file
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def remove_stale_temp_files(path: Path | None, *, max_age: float = 86400.0) -> None:
+    """Delete temp files that a crashed save left next to ``path`` (older than a day by default)."""
+    if path is None:
+        return
+    cutoff = time.time() - max_age
+    try:
+        candidates = [*path.parent.glob(glob.escape(path.name) + ".*.tmp"), path.with_name(path.name + ".tmp")]
+        for candidate in candidates:
+            try:
+                if candidate.is_file() or candidate.is_symlink():
+                    if candidate.lstat().st_mtime < cutoff:
+                        candidate.unlink(missing_ok=True)
+            except OSError:
+                continue
+    except OSError:
+        pass
 
 
 def _check_tokenizer(tokenizer: TokenizerLike | None) -> None:

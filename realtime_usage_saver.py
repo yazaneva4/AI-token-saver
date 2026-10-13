@@ -11,7 +11,9 @@ import secrets
 import time
 from typing import Iterable, Iterator
 
-from ai_token_saver import CompactionResult, RealtimeCompactor, _resolve_dedupe, check_state_path
+from ai_token_saver import (
+    CompactionResult, RealtimeCompactor, _resolve_dedupe, check_state_path, remove_stale_temp_files, write_state_file,
+)
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,7 @@ class RealtimeUsageSaver:
         self.retain = retain  # False: keep neither the input nor the output (constant memory, no CompactionResult)
         self._hasher = None
         self.state_path = check_state_path(state_path)
+        remove_stale_temp_files(self.state_path)
         self.lock_timeout = float(lock_timeout)
         self.last_fingerprint = last_fingerprint if last_fingerprint is not None else self._load_fingerprint()
         self._compactor: RealtimeCompactor | None = None
@@ -85,13 +88,7 @@ class RealtimeUsageSaver:
     def _persist_fingerprint(self, fingerprint: str) -> None:
         if self.state_path is None:
             return
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.state_path.with_suffix(self.state_path.suffix + f".{os.getpid()}.{secrets.token_hex(8)}.tmp")
-        try:
-            temporary.write_text(json.dumps({"fingerprint": fingerprint}, separators=(",", ":")), encoding="utf-8")
-            temporary.replace(self.state_path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        write_state_file(self.state_path, json.dumps({"fingerprint": fingerprint}, separators=(",", ":")))
 
     def _lock_owner_alive(self, lock_path: Path) -> bool | None:
         try:

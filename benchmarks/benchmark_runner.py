@@ -11,9 +11,9 @@ import argparse
 import json
 import statistics
 import time
-from typing import Callable, Iterable
+from typing import Callable
 
-from ai_token_saver import Memory, RealtimeCompactor, compact_stream, compact_text, compact_text_with_metrics, estimate_tokens, expand_runs, merge_memory
+from ai_token_saver import Memory, compact_stream, compact_text, compact_text_with_metrics, estimate_tokens, expand_runs, merge_memory
 
 
 @dataclass

@@ -17,7 +17,7 @@ import re
 import secrets
 import shutil
 import time
-from typing import Callable, Iterable, Iterator, Literal, Mapping, Protocol
+from typing import Callable, Iterable, Iterator, Mapping, Protocol
 
 
 class Tokenizer(Protocol):

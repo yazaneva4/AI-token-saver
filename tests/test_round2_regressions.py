@@ -1,11 +1,9 @@
 """Round 2: regression, preservation, security, concurrency and randomized tests."""
 from __future__ import annotations
 
-import ast
 import concurrent.futures
 import itertools
 import json
-import os
 import random
 
 import pytest
@@ -168,7 +166,7 @@ def test_every_split_matches_batch(text, mode):
     batch = compact_text(text, dedupe=mode)
     for cuts in small_cut_sets(len(text)):
         points = [0, *cuts, len(text)]
-        chunks = [text[a:b] for a, b in zip(points, points[1:])]
+        chunks = [text[a:b] for a, b in zip(points, points[1:], strict=False)]
         assert "".join(compact_stream(chunks, dedupe=mode)) == batch, (text, cuts)
 
 

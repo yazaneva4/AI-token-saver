@@ -1,7 +1,7 @@
 """SQL continuation lines must survive every mode; metrics must report growth honestly."""
 import pytest
 
-from ai_token_saver import DEDUPE_MODES, compact_stream, compact_text, compact_text_with_metrics
+from ai_token_saver import DEDUPE_MODES, compact_stream, compact_text
 
 SQL = (
     "CREATE FUNCTION set_limit(float4)\nRETURNS float4\nAS 'MODULE_PATHNAME'\nLANGUAGE C STRICT VOLATILE PARALLEL UNSAFE;\n\n"

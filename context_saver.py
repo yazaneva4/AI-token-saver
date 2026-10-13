@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import secrets
 import time
 from typing import Callable, Iterable, Mapping
@@ -186,7 +185,7 @@ class ContextSaver:
                 except OSError:
                     pass
                 if time.monotonic() >= deadline:
-                    raise TimeoutError(f"timed out waiting for context lock: {lock_path}")
+                    raise TimeoutError(f"timed out waiting for context lock: {lock_path}") from None
                 time.sleep(0.01)
 
     def _release_lock(self, lock_state: tuple[int | None, str | None]) -> None:

@@ -1,6 +1,6 @@
 """Regression tests for bugs found during deep bug-hunter reviews."""
 
-from ai_token_saver import RealtimeCompactor, compact_text, compact_text_with_metrics, deduplicate
+from ai_token_saver import RealtimeCompactor, compact_text_with_metrics, deduplicate
 
 
 def test_direct_deduplicate_protects_code_even_in_aggressive_mode():

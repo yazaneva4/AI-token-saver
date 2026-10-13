@@ -142,7 +142,7 @@ class RealtimeUsageSaver:
                 except OSError:
                     pass
                 if time.monotonic() >= deadline:
-                    raise TimeoutError(f"timed out waiting for realtime saver lock: {lock_path}")
+                    raise TimeoutError(f"timed out waiting for realtime saver lock: {lock_path}") from None
                 time.sleep(0.01)
 
     def _release_lock(self, lock_state: tuple[int | None, str | None]) -> None:

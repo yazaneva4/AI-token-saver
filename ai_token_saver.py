@@ -200,6 +200,17 @@ _EVENT_RECORD = re.compile(
 _CODE_PUNCTUATION = re.compile(r"[{}\[\]()<>=;\\|$@^~`]|\+\+|--|->|::")
 # Counts, ids, paths, file names and labels carry data, so they are never treated as prose either.
 _NON_PROSE = re.compile(r"\d|\w[./\\]\w|:\s*$|\S,\S|\t")
+# SQL clause lines (RETURNS ..., AS '...', LANGUAGE ..., FROM ...) continue a statement, so dropping a repeat breaks it.
+# Upper-case clause keywords at the start of a line are never prose; whole SQL statements make the input technical.
+_SQL_CLAUSE = re.compile(
+    r"(?:RETURNS|AS|LANGUAGE|FROM|WHERE|JOIN|ON|SET|VALUES|INTO|BEGIN|END|SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|GRANT)\b"
+)
+_SQL_STATEMENT = re.compile(
+    r"\s*(?:(?:CREATE|ALTER|DROP)\s+(?:OR\s+REPLACE\s+)?(?:(?:TEMP|TEMPORARY|UNIQUE|MATERIALIZED)\s+)?"
+    r"(?:TABLE|FUNCTION|PROCEDURE|VIEW|INDEX|TRIGGER|TYPE|SCHEMA|DATABASE|EXTENSION|SEQUENCE|ROLE|USER|DOMAIN)\b"
+    r"|SELECT\s.+\sFROM\b|INSERT\s+INTO\b|DELETE\s+FROM\b|UPDATE\s+\S+\s+SET\b|GRANT\s.+\sON\b)",
+    re.IGNORECASE,
+)
 _COMMAND_WORDS = frozenset(
     "echo cd ls cat git make npm npx pip pip3 pytest python python3 node go cargo docker kubectl curl wget rm cp mv mkdir touch "
     "export source sudo apt apt-get brew yarn pnpm gcc clang tar chmod chown ssh scp grep sed awk find tail head sleep kill".split()
@@ -229,6 +240,8 @@ def _is_dedupable_prose(line: str) -> bool:
         return False
     if _CODE_PUNCTUATION.search(line) or _NON_PROSE.search(line) or _EVENT_RECORD.search(line):
         return False
+    if _SQL_CLAUSE.match(line):
+        return False
     words = line.split()
     if words[0] in _COMMAND_WORDS or (len(words) == 1 and words[0] in _BARE_KEYWORDS):
         return False
@@ -238,7 +251,7 @@ def _is_dedupable_prose(line: str) -> bool:
 @_cache_short_lines
 def _is_technical_line(line: str) -> bool:
     """Equivalent to ``_looks_like_technical_content([line])`` with one hint scan instead of two."""
-    if _CODE_HINT_RE.search(line):
+    if _CODE_HINT_RE.search(line) or _SQL_STATEMENT.match(line):
         return True
     stripped = line.strip()
     return bool(stripped) and _code_syntax_or_json(stripped)
@@ -660,7 +673,7 @@ def compact_text_with_metrics(
         compacted,
         in_tokens,
         out_tokens,
-        max(0.0, change / 100.0),
+        change / 100.0,  # negative when the output is larger than the input
         exact,
         source,
         change,

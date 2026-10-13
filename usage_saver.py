@@ -13,8 +13,11 @@ import json
 import re
 from typing import Any, Iterable, Mapping
 
-SAVER_ALIASES = frozenset({"/ai-token-saver", "/ai-usage-saver"})
-_SAVER_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9_-])/(?:ai-token-saver|ai-usage-saver)(?![A-Za-z0-9_-])")
+SAVER_ALIASES = frozenset({"/ai-token-saver", "/ai-usage-saver", "/save", "/save-all"})
+# ``/save secret`` is a separate, explicit secret operation (see SKILL.md), so it is not a saver command.
+_SAVER_COMMAND_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])/(?:ai-token-saver|ai-usage-saver|save-all|save(?!\s+secret\b))(?![A-Za-z0-9_-])"
+)
 
 
 def _text(value: object) -> str:

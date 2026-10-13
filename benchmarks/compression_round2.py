@@ -132,15 +132,15 @@ def main():
             tokens = sum(count(o) for o in outputs)
             saved = round(100 * (1 - tokens / t_in), 2) if t_in else 0.0
             if label == "runs":
-                lossless = all(Counter(nonblank(expand_runs(o))) == Counter(nonblank(d)) for d, o in zip(docs, outputs))
+                lossless = all(Counter(nonblank(expand_runs(o))) == Counter(nonblank(d)) for d, o in zip(docs, outputs, strict=True))
                 dropped = 0
             elif label == "default":  # every line, with its repeat count, must still be there
-                lossless = all(Counter(nonblank(o)) == Counter(nonblank(d)) for d, o in zip(docs, outputs))
+                lossless = all(Counter(nonblank(o)) == Counter(nonblank(d)) for d, o in zip(docs, outputs, strict=True))
                 dropped = before - sum(len(nonblank(o)) for o in outputs)
             else:
                 lossless = None
                 dropped = before - sum(len(nonblank(o)) for o in outputs)
-            parse = {syntax_ok(name, d, o) for d, o in zip(docs, outputs)} - {None}
+            parse = {syntax_ok(name, d, o) for d, o in zip(docs, outputs, strict=True)} - {None}
             row[label] = {"tokens_out": tokens, "saved_pct": saved, "lossless": lossless, "dropped_lines": dropped,
                           "parse_ok": (parse == {True}) if parse else None, "ms": round(seconds * 1000), "peak_kb": round(peak / 1024)}
         rows.append(row)

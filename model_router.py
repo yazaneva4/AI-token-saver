@@ -125,8 +125,8 @@ def _candidates(main: str, tier: str, tokens: int, ranks: tuple[str, ...] = MODE
         top = max(models, key=q)
         quality = q(top) + (0.4 * max(0.0, q(main) - q(top)) if len(models) == 1 else -0.03)
         weight = [1.0] + [VERIFY] * (len(models) - 1)
-        cost = sum(COST[m] * w for m, w in zip(models, weight)) * tokens + COST[main] * REVIEW * tokens
-        speed = sum(SPEED[m] * w for m, w in zip(models, weight)) + SPEED[main] * REVIEW
+        cost = sum(COST[m] * w for m, w in zip(models, weight, strict=True)) * tokens + COST[main] * REVIEW * tokens
+        speed = sum(SPEED[m] * w for m, w in zip(models, weight, strict=True)) + SPEED[main] * REVIEW
         out.append({"name": name, "mode": mode, "models": tuple(models), "quality": min(1.0, quality),
                     "cost": cost, "speed": speed, "main_tokens": REVIEW * tokens})
 

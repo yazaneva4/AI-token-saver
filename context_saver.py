@@ -6,12 +6,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import secrets
 import time
 from typing import Callable, Iterable, Mapping
 
-from ai_token_saver import check_state_path
+from ai_token_saver import check_state_path, remove_stale_temp_files, write_state_file
 
 PRESERVED_FIELDS = ("project", "current_task", "decisions", "bugs", "fixes", "files", "commands", "tests", "services", "next_steps")
 
@@ -112,6 +111,7 @@ class ContextSaver:
         if not lock_timeout > 0:
             raise ValueError("lock_timeout must be positive")
         self.state_path = check_state_path(state_path)
+        remove_stale_temp_files(self.state_path)
         self.lock_timeout = float(lock_timeout)
         self.last_fingerprint = last_fingerprint if last_fingerprint is not None else self._load_fingerprint()
         self.last_snapshot: ContextSnapshot | None = None
@@ -133,10 +133,7 @@ class ContextSaver:
     def _persist_fingerprint(self, fingerprint: str) -> None:
         if self.state_path is None:
             return
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
-        temporary.write_text(json.dumps({"fingerprint": fingerprint}, separators=(",", ":")), encoding="utf-8")
-        temporary.replace(self.state_path)
+        write_state_file(self.state_path, json.dumps({"fingerprint": fingerprint}, separators=(",", ":")))
 
     def _lock_owner_alive(self, lock_path: Path) -> bool | None:
         try:
@@ -165,7 +162,7 @@ class ContextSaver:
             return None, None
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + self.lock_timeout
-        stale_after = max(self.lock_timeout * 2, 1.0)
+        stale_after = 1.0  # an empty or unparseable lock is a crash leftover: its writer needs milliseconds, not seconds
         while True:
             token = secrets.token_hex(16)
             try:
@@ -188,7 +185,7 @@ class ContextSaver:
                 except OSError:
                     pass
                 if time.monotonic() >= deadline:
-                    raise TimeoutError(f"timed out waiting for context lock: {lock_path}")
+                    raise TimeoutError(f"timed out waiting for context lock: {lock_path}") from None
                 time.sleep(0.01)
 
     def _release_lock(self, lock_state: tuple[int | None, str | None]) -> None:

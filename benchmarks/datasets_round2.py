@@ -64,8 +64,8 @@ def agent_conversation(limit=1_000_000, seed=1):
             if attempt < 2:
                 block += ["Assistant: Still failing; checking the guard clause.", f"$ sed -n '30,60p' src/{mod}.py"]
         block += [
-            f"Assistant: The function indexes data[0] before checking length. Fixing it.",
-            f"--- a/src/{mod}.py", f"+++ b/src/{mod}.py", "@@ -31,6 +31,8 @@", f"     def handle(self, data):",
+            "Assistant: The function indexes data[0] before checking length. Fixing it.",
+            f"--- a/src/{mod}.py", f"+++ b/src/{mod}.py", "@@ -31,6 +31,8 @@", "     def handle(self, data):",
             "+        if not data:", "+            return []", "         first = data[0]",
             f"$ python -m pytest tests/test_{mod}.py -q",
             f"tests/test_{mod}.py ...                                                   [100%]",

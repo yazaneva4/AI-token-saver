@@ -63,7 +63,7 @@ LOOKALIKES = [
 @pytest.mark.parametrize("lookalike", LOOKALIKES)
 def test_text_resembling_the_marker_cannot_confuse_the_decoder(lookalike):
     for text in (f"{lookalike}\n", f"hello world\nhello world\n{lookalike}\n", f"{lookalike}\n" * 4,
-                 f"same line here\n" * 9 + f"{lookalike}\nsame line here\n" * 3, f"{lookalike}", f"a\n{lookalike}\n{lookalike}\nb"):
+                 "same line here\n" * 9 + f"{lookalike}\nsame line here\n" * 3, f"{lookalike}", f"a\n{lookalike}\n{lookalike}\nb"):
         packed = compact_text(text, dedupe="runs")
         assert expand_runs(packed) == text, (text, packed)
         assert stream(text, (2,), dedupe="runs") == packed
@@ -213,7 +213,7 @@ def test_every_two_way_and_three_way_split_matches_batch(text, mode):
         cuts += [[i, j] for i in range(n + 1) for j in range(i, n + 1)]
     for cut in cuts:
         points = [0, *cut, n]
-        chunks = [text[a:b] for a, b in zip(points, points[1:])]
+        chunks = [text[a:b] for a, b in zip(points, points[1:], strict=False)]
         assert "".join(compact_stream(chunks, dedupe=mode)) == batch, (mode, cut)
 
 

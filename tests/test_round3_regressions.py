@@ -1,7 +1,6 @@
 """Round 3: meaningful repetitions are preserved by default; structured redaction keeps JSON semantics."""
 from __future__ import annotations
 
-import ast
 import itertools
 import json
 import random

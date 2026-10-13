@@ -1,9 +1,7 @@
 """Regression, equivalence and randomized tests for the independent audit findings."""
 from __future__ import annotations
 
-import ast
 import itertools
-import json
 import random
 
 import pytest
@@ -24,7 +22,7 @@ def stream(text: str, sizes=(1,), **kwargs) -> str:
 
 def split_at(text: str, cuts) -> list[str]:
     points = [0, *sorted(cuts), len(text)]
-    return [text[a:b] for a, b in zip(points, points[1:])]
+    return [text[a:b] for a, b in zip(points, points[1:], strict=False)]
 
 
 # ---------------------------------------------------------------- 1. batch == stream

@@ -129,7 +129,7 @@ AI-token-saver/
 ├── provider_adapter.py       # provider-neutral integration and output levels
 ├── providers.py              # provider/tier catalog for sub-agents
 ├── model_router.py           # sub-agent routing and auto optimizer
-├── delegate.py               # command-line runner for routed sub-agents
+├── delegate.py               # runner for routed sub-agents
 ├── benchmarks/               # benchmark runner, savings, audit, compression and stress benchmarks
 ├── tests/                    # test suite
 └── .github/workflows/        # CI (tests.yml)
@@ -149,9 +149,6 @@ cd AI-token-saver
 `ai_token_saver.py` is a Python library with no command-line interface. See
 [Python usage](#python-usage) below. Without a supplied model tokenizer, token
 measurements are labeled approximate.
-
-To remove repeated lines, pass `dedupe="runs"` (keeps a count) or the lossy `dedupe="adjacent"` / `aggressive=True`.
-Technical-looking content remains protected.
 
 ## Python usage
 

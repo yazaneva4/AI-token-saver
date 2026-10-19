@@ -342,3 +342,7 @@ Tiers are labels matched by model name, not a power ranking across vendors: noth
 | `AITS_CUSTOM_PROVIDERS` | JSON such as `{"mycli": {"cmd": "mycli --model {model} --effort {effort}", "light": "...", "deep": "..."}}`; the prompt goes on stdin |
 
 Python hosts can pass the models they can reach directly: `route("edit", main="gpt-5", providers={"codex": {"light": "...", "standard": "...", "deep": "..."}})`. Model names change often, so none are hard-coded beyond Claude's aliases. Tier placement is a name heuristic, so check `route(...).steps` for an unusual model id.
+
+## Live context and updates
+
+Run `python live_watch.py context.txt --output compacted-context.txt --interval 1` to publish changed snapshots while the watcher runs. Repeated unchanged input is skipped. Use `python update_skill.py` to check a Git installation, or `python update_skill.py --update` to fast-forward a clean clone; restart running tools and reload the host skill afterwards. ZIP installations require replacing the package. `python build_skill.py` rebuilds the installable ZIP from current source.

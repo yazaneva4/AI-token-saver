@@ -41,6 +41,10 @@ Treat the command as a control signal, not content. Compare local state with the
 
 The main model manages; sub-agents come from the user's signed-in CLIs, never API keys. Default mode is `auto` (an optimizer picks solo, one-model or mix by quality, cost, speed and main-model tokens). Do not delegate small tasks. Use `python delegate.py --kind <kind> --main <model> ...`. Tiers: Haiku = light, Sonnet = standard, Opus = deep; other providers map by model name.
 
+## Live context and updates
+
+Re-read current state after changes; never present cached facts as live. For a running local file watcher and Git-install update commands, read `references/live-updates.md`. A loaded skill needs a host reload after its code changes.
+
 ## Read more only when needed
 
 - `references/workflow-and-output.md`: full everyday workflow, output-level and savings detail.
